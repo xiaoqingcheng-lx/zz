@@ -1,0 +1,18 @@
+# 构建产物
+/dist/
+
+# 运行时数据库（由程序自动创建）
+/data/
+*.db
+*.db.tmp
+
+# 编译临时文件
+*.exe
+*.test
+*.out
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp

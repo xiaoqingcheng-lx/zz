@@ -1,0 +1,2 @@
+[console_scripts]
+pet-hospital-mcp = pet_hospital_mcp.__main__:main

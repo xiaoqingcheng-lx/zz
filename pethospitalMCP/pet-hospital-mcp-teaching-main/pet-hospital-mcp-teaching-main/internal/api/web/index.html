@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#6257e6">
+<title>宠物医院 · 档案工作台</title>
+<style>
+  :root{
+    --bg:#f5f7fb;
+    --surface:#ffffff;
+    --surface-2:#f8fafc;
+    --ink:#172033;
+    --muted:#69758a;
+    --line:#e4e9f2;
+    --brand:#6257e6;
+    --brand-strong:#4d43c7;
+    --brand-soft:#f0efff;
+    --teal:#0f9b8e;
+    --teal-soft:#e7faf7;
+    --amber:#b96e12;
+    --amber-soft:#fff5e6;
+    --danger:#d6455d;
+    --danger-soft:#fff0f3;
+    --radius:16px;
+    --radius-sm:11px;
+    --shadow:0 12px 32px rgba(35,45,80,.07),0 2px 6px rgba(35,45,80,.04);
+    --shadow-lg:0 24px 60px rgba(29,34,62,.2);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;min-height:100vh;color:var(--ink);
+    background:
+      radial-gradient(circle at 8% -10%,rgba(98,87,230,.12),transparent 30rem),
+      radial-gradient(circle at 92% 12%,rgba(15,155,142,.1),transparent 24rem),
+      var(--bg);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;opacity:.32;
+    background-image:radial-gradient(rgba(98,87,230,.12) 1px,transparent 1px);
+    background-size:22px 22px;
+    mask-image:linear-gradient(to bottom,black,transparent 420px);
+  }
+  ::selection{background:rgba(98,87,230,.2)}
+  a{color:var(--brand);text-decoration:none}
+  button{font:inherit;cursor:pointer}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{
+    outline:3px solid rgba(98,87,230,.25);outline-offset:2px;
+  }
+
+  /* ---------- 顶部导航 ---------- */
+  header{
+    position:sticky;top:0;z-index:20;border-bottom:1px solid rgba(228,233,242,.9);
+    background:rgba(255,255,255,.88);backdrop-filter:blur(16px);
+  }
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+  .top{display:flex;align-items:center;gap:16px;min-height:72px}
+  .brand{display:flex;align-items:center;gap:12px;min-width:0}
+  .logo{
+    width:42px;height:42px;display:grid;place-items:center;flex:none;border-radius:13px;
+    color:#fff;background:linear-gradient(135deg,#7669f1,#5145ce);
+    box-shadow:0 8px 18px rgba(98,87,230,.28),inset 0 1px 0 rgba(255,255,255,.25);
+  }
+  .logo svg{width:25px;height:25px;fill:currentColor}
+  .brand-copy{min-width:0}
+  .title{font-size:18px;font-weight:720;letter-spacing:-.02em;line-height:1.25}
+  .sub{margin-top:2px;color:var(--muted);font-size:12.5px;letter-spacing:.02em}
+  .db-pill{
+    display:flex;align-items:center;gap:8px;max-width:420px;padding:7px 12px;
+    color:var(--muted);font-size:12.5px;line-height:1.35;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;
+  }
+  .pulse{width:8px;height:8px;flex:none;border-radius:50%;background:var(--teal);box-shadow:0 0 0 4px var(--teal-soft)}
+  .grow{flex:1}
+  .header-actions{display:flex;align-items:center;gap:9px}
+  main{position:relative;padding:28px 0 72px}
+
+  /* ---------- 欢迎区 ---------- */
+  .hero{
+    position:relative;overflow:hidden;display:flex;align-items:center;justify-content:space-between;gap:24px;
+    margin-bottom:22px;padding:28px 30px;border:1px solid rgba(154,146,255,.28);border-radius:22px;
+    color:#fff;background:linear-gradient(118deg,#5145ce 0%,#7164ef 56%,#806ff0 100%);
+    box-shadow:0 18px 42px rgba(81,69,206,.22);
+  }
+  .hero::before,.hero::after{content:"";position:absolute;border-radius:50%;pointer-events:none}
+  .hero::before{width:230px;height:230px;right:-45px;top:-90px;background:rgba(255,255,255,.12)}
+  .hero::after{width:120px;height:120px;right:155px;bottom:-80px;border:18px solid rgba(255,255,255,.1)}
+  .hero-copy{position:relative;z-index:1;max-width:650px}
+  .eyebrow{display:inline-block;margin-bottom:7px;color:rgba(255,255,255,.78);font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+  .hero h1{margin:0;font-size:clamp(25px,4vw,38px);line-height:1.18;letter-spacing:-.035em}
+  .hero p{max-width:570px;margin:11px 0 0;color:rgba(255,255,255,.82);font-size:14px}
+  .hero-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+  .hero .btn{border-color:rgba(255,255,255,.25);color:#fff;background:rgba(255,255,255,.13)}
+  .hero .btn:hover{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.45)}
+  .hero .btn.primary{background:#fff;color:var(--brand-strong);border-color:#fff}
+  .hero .btn.primary:hover{background:#f4f2ff}
+  .hero-art{position:relative;z-index:1;flex:none;width:126px;height:126px;display:grid;place-items:center;border-radius:38px;background:rgba(255,255,255,.14);transform:rotate(4deg)}
+  .hero-art svg{width:76px;height:76px;fill:#fff;filter:drop-shadow(0 8px 12px rgba(45,35,120,.2))}
+
+  /* ---------- 通用区块 ---------- */
+  .section{margin-bottom:22px}
+  .section-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 2px 13px}
+  .section-heading h2{margin:0;font-size:19px;letter-spacing:-.025em}
+  .section-heading .eyebrow{margin:0 0 4px;color:var(--brand);font-size:11px}
+  .section-meta{color:var(--muted);font-size:12.5px}
+
+  /* ---------- 统计卡片 ---------- */
+  .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:13px;margin-bottom:22px}
+  .stat{
+    position:relative;overflow:hidden;display:flex;align-items:center;gap:13px;min-height:92px;
+    padding:15px 16px;border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--surface);box-shadow:var(--shadow);
+  }
+  .stat::after{content:"";position:absolute;right:-22px;bottom:-28px;width:76px;height:76px;border-radius:50%;background:var(--accent-soft,var(--brand-soft))}
+  .stat-icon{position:relative;z-index:1;width:39px;height:39px;display:grid;place-items:center;flex:none;border-radius:11px;color:var(--accent,var(--brand));background:var(--accent-soft,var(--brand-soft))}
+  .stat-icon svg{width:21px;height:21px;fill:currentColor}
+  .stat-copy{position:relative;z-index:1;min-width:0}
+  .stat-label{color:var(--muted);font-size:12px}
+  .stat-value{margin-top:2px;font-size:22px;font-weight:720;letter-spacing:-.03em;line-height:1.2;font-variant-numeric:tabular-nums}
+  .stat-value small{margin-left:3px;color:var(--muted);font-size:12px;font-weight:550}
+  .stat-purple{--accent:#6257e6;--accent-soft:#f0efff}
+  .stat-teal{--accent:#0f9b8e;--accent-soft:#e7faf7}
+  .stat-amber{--accent:#b96e12;--accent-soft:#fff5e6}
+  .stat-rose{--accent:#d6455d;--accent-soft:#fff0f3}
+  .stat-blue{--accent:#3978e5;--accent-soft:#edf4ff}
+
+  /* ---------- 卡片与筛选 ---------- */
+  .card{margin-bottom:22px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}
+  .card-h{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .card-h h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.015em}
+  .card-h .eyebrow{display:block;margin-bottom:2px;color:var(--brand);font-size:10.5px;letter-spacing:.1em}
+  .card-meta{color:var(--muted);font-size:12.5px}
+  .card-b{padding:18px 20px}
+  .filter-card{border-color:rgba(154,146,255,.24)}
+  .filter-grid{display:grid;grid-template-columns:1.5fr repeat(4,1fr);gap:13px}
+  .field{min-width:0}
+  label{display:block;margin-bottom:6px;color:#526078;font-size:12.5px;font-weight:600}
+  input,select,textarea{
+    width:100%;padding:10px 12px;border:1px solid #dfe5ef;border-radius:var(--radius-sm);
+    color:var(--ink);background:#fff;outline:none;font:inherit;transition:border-color .15s,box-shadow .15s,background .15s;
+  }
+  input::placeholder{color:#a4afbf}
+  input:focus,select:focus,textarea:focus{border-color:var(--brand);background:#fff;box-shadow:0 0 0 4px rgba(98,87,230,.1)}
+  textarea{resize:vertical;min-height:68px}
+  .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #dfe5ef;
+    padding:9px 15px;border-radius:10px;color:var(--ink);background:#fff;font-weight:650;font-size:13.5px;
+    transition:transform .15s,background .15s,border-color .15s,box-shadow .15s;white-space:nowrap;
+  }
+  .btn:hover{transform:translateY(-1px);background:#f8f9fc;border-color:#cdd5e5;box-shadow:0 5px 12px rgba(35,45,80,.07)}
+  .btn:active{transform:translateY(0)}
+  .btn.primary{color:#fff;border-color:var(--brand);background:linear-gradient(135deg,#7164ef,var(--brand));box-shadow:0 6px 14px rgba(98,87,230,.2)}
+  .btn.primary:hover{border-color:var(--brand-strong);background:linear-gradient(135deg,#6257e6,var(--brand-strong))}
+  .btn.danger{color:var(--danger);border-color:#f2c3cd;background:#fff}
+  .btn.danger:hover{background:var(--danger-soft);border-color:#e79cac}
+  .btn.sm{padding:7px 12px;font-size:12.5px;border-radius:9px}
+  .btn:disabled{opacity:.48;cursor:not-allowed;transform:none;box-shadow:none}
+  .btn svg{width:15px;height:15px;fill:currentColor}
+  .filter-actions{display:flex;align-items:center;gap:9px;margin-top:15px;padding-top:15px;border-top:1px dashed var(--line)}
+  .filter-actions .grow{flex:1}
+
+  /* ---------- 表格 ---------- */
+  .table-card{overflow:hidden}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:12px 15px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:#758198;background:var(--surface-2);font-size:11.5px;font-weight:700;letter-spacing:.04em}
+  tbody tr{transition:background .12s}
+  tbody tr:hover{background:#f8f7ff;cursor:pointer}
+  tbody tr:last-child td{border-bottom:0}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  th.num{text-align:right}
+  .name{display:block;font-weight:700;color:var(--ink)}
+  .species{display:block;margin-top:1px;color:var(--muted);font-size:12px}
+  .owner{color:#40506a}
+  .phone{display:block;margin-top:2px;color:var(--muted);font-size:12px}
+  .muted{color:var(--muted)}
+  .empty{padding:44px 20px;text-align:center;color:var(--muted)}
+  .empty strong{display:block;margin-bottom:5px;color:#40506a;font-size:15px}
+  .pager{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 16px;border-top:1px solid var(--line);background:var(--surface-2)}
+  .pager .muted{font-size:12.5px}
+
+  /* ---------- 徽章 ---------- */
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border:1px solid transparent;border-radius:999px;font-size:11.5px;font-weight:700;line-height:1.4}
+  .badge::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+  .b-wait{background:#edf4ff;color:#2867c7;border-color:#d5e5ff}
+  .b-treat{background:var(--amber-soft);color:var(--amber);border-color:#f6ddba}
+  .b-hosp{background:var(--danger-soft);color:var(--danger);border-color:#f4c5cf}
+  .b-ok{background:var(--teal-soft);color:var(--teal);border-color:#c8f0e9}
+  .b-chronic{background:#f3f0ff;color:#6653cc;border-color:#ddd6fb}
+
+  /* ---------- 表单与详情 ---------- */
+  .form-sections{display:grid;gap:17px}
+  .form-section{padding:16px;border:1px solid var(--line);border-radius:14px;background:#fbfcfe}
+  .form-section .section-heading{display:block;margin:0 0 13px}
+  .form-section .section-heading h3{margin:0;font-size:14px;font-weight:720}
+  .section-heading .section-copy{display:block;margin-top:2px;color:var(--muted);font-size:12px}
+  .section-index{display:inline-grid;place-items:center;width:23px;height:23px;margin-right:8px;border-radius:7px;color:#fff;background:var(--brand);font-size:11px;font-weight:750;vertical-align:baseline}
+  .form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+  .info-card{padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe}
+  .info-card .field{margin:0}
+  .info-card label{margin-bottom:3px}
+  .detail-profile{display:flex;align-items:center;gap:13px;margin-bottom:17px;padding:15px;border:1px solid rgba(154,146,255,.25);border-radius:14px;background:linear-gradient(120deg,#f4f3ff,#f8fbff)}
+  .profile-icon{width:45px;height:45px;display:grid;place-items:center;flex:none;border-radius:13px;color:var(--brand);background:#fff;box-shadow:0 5px 12px rgba(98,87,230,.12)}
+  .profile-icon svg{width:25px;height:25px;fill:currentColor}
+  .profile-copy{min-width:0}
+  .profile-copy strong{display:block;font-size:16px}
+  .profile-copy span{display:block;color:var(--muted);font-size:12.5px}
+  .detail-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0 3px}
+  .detail-stats .stat{min-height:78px;padding:12px}
+  .detail-stats .stat-icon{width:32px;height:32px;border-radius:9px}
+  .detail-stats .stat-icon svg{width:18px;height:18px}
+  .detail-stats .stat-value{font-size:18px}
+  .table-wrap{overflow-x:auto;margin:0 -4px 5px;padding:0 4px}
+  .mini{width:100%;min-width:560px;border-collapse:collapse;font-size:13px}
+  .mini th,.mini td{padding:9px 10px;border-bottom:1px solid var(--line);white-space:normal;vertical-align:top}
+  .mini th{color:#758198;background:#f8fafc;font-size:11.5px}
+  .mini tbody tr:last-child td{border-bottom:0}
+  .sec-t{margin:20px 0 9px;font-size:13.5px;font-weight:720}
+  .sec-t:first-child{margin-top:0}
+  .hint{margin-top:6px;color:var(--muted);font-size:12.5px}
+  code{padding:1px 6px;border-radius:5px;color:#526078;background:#f0f2f7;font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* ---------- 弹窗与提示 ---------- */
+  .mask{position:fixed;inset:0;z-index:50;display:none;align-items:flex-start;justify-content:center;padding:38px 16px;overflow-y:auto;background:rgba(22,28,48,.58);backdrop-filter:blur(4px)}
+  .mask.on{display:flex}
+  .modal{width:100%;max-width:820px;border:1px solid rgba(255,255,255,.65);border-radius:20px;background:var(--surface);box-shadow:var(--shadow-lg);animation:pop .18s ease-out}
+  @keyframes pop{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:none}}
+  .modal-h{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .modal-h h3{margin:0;font-size:16px;font-weight:720;letter-spacing:-.015em}
+  .modal-b{padding:20px;max-height:68vh;overflow:auto}
+  .modal-f{display:flex;justify-content:flex-end;gap:9px;padding:14px 20px;border-top:1px solid var(--line);background:var(--surface-2);border-radius:0 0 20px 20px}
+  .x{display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:9px;color:var(--muted);background:transparent;font-size:23px;line-height:1}
+  .x:hover{color:var(--ink);background:#f0f2f7}
+  #toast{position:fixed;right:20px;bottom:20px;z-index:99;display:flex;flex-direction:column;align-items:flex-end;gap:9px}
+  .toast{max-width:min(360px,calc(100vw - 40px));padding:11px 15px;border-radius:11px;color:#fff;background:#26324a;box-shadow:0 10px 24px rgba(22,28,48,.24);font-size:13.5px;animation:pop .16s ease-out}
+  .toast.err{background:var(--danger)}
+  .toast.ok{background:#0d8b75}
+
+  @media (max-width:1050px){
+    .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .db-pill{max-width:280px}
+  }
+  @media (max-width:760px){
+    .wrap{padding:0 16px}
+    .top{min-height:64px;gap:10px}
+    .logo{width:37px;height:37px;border-radius:11px}
+    .title{font-size:15.5px}
+    .sub{font-size:11px}
+    .db-pill{display:none}
+    .header-actions{gap:6px}
+    .header-actions .btn{padding:7px 9px;font-size:12px}
+    main{padding:20px 0 56px}
+    .hero{align-items:flex-start;flex-direction:column;padding:23px 21px;border-radius:18px}
+    .hero-art{display:none}
+    .hero h1{font-size:27px}
+    .hero p{font-size:13px}
+    .section-heading{align-items:flex-start;flex-direction:column;gap:5px;margin-bottom:10px}
+    .section-meta{font-size:11.5px}
+    .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:17px}
+    .stat{min-height:83px;padding:12px;gap:10px}
+    .stat-icon{width:34px;height:34px}
+    .stat-value{font-size:19px}
+    .filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .card-h,.card-b{padding:15px}
+    .card-meta{font-size:11.5px}
+    .filter-actions{margin-top:13px;padding-top:13px}
+    /* 在窄屏把表格变成可扫描的档案卡片 */
+    .hide-sm{display:none}
+    .table-card{border-radius:15px}
+    .tbl-scroll{overflow:visible}
+    table{display:block}
+    thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+    tbody{display:block}
+    tbody tr{display:block;margin:0 10px 11px;padding:13px 13px 10px;border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:0 4px 12px rgba(35,45,80,.05)}
+    tbody tr:hover{background:#fff}
+    tbody td{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed #edf0f5;white-space:normal;text-align:right}
+    tbody td:last-child{border-bottom:0}
+    tbody td::before{content:attr(data-label);flex:none;color:#758198;font-size:11.5px;font-weight:700;letter-spacing:.03em;text-align:left}
+    tbody td.empty{display:block;padding:0 20px;text-align:left}
+    tbody td.empty::before{content:none}
+    .name{text-align:left}
+    .species{text-align:left}
+    .owner{text-align:right}
+    .phone{text-align:right}
+    .form-grid{grid-template-columns:1fr}
+    .detail-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .modal{max-width:none;border-radius:16px}
+    .mask{padding:18px 9px}
+    .modal-b{max-height:75vh;padding:16px}
+    .modal-f{padding:12px 15px}
+  }
+  @media (max-width:430px){
+    .header-actions .btn span{display:none}
+    .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .stat-label{font-size:11px}
+    .stat-value{font-size:18px}
+    .filter-grid{grid-template-columns:1fr}
+    .hero-actions .btn{flex:1}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 13.2c-2.5 0-5.2 2.1-5.2 4.5 0 1.5 1 2.5 2.5 2.5 1 0 1.7-.4 2.7-.4s1.7.4 2.7.4c1.5 0 2.5-1 2.5-2.5 0-2.4-2.7-4.5-5.2-4.5Z"/><path d="M6.7 8.1c-1.2-.3-2.5.9-2.8 2.6-.3 1.6.4 3 1.6 3.3 1.2.3 2.5-.9 2.8-2.6.3-1.6-.4-3-1.6-3.3Z"/><path d="M17.3 8.1c-1.2.3-1.9 1.7-1.6 3.3.3 1.7 1.6 2.9 2.8 2.6 1.2-.3 1.9-1.7 1.6-3.3-.3-1.7-1.6-2.9-2.8-2.6Z"/><path d="M9.2 3.2c-1.2.2-1.9 1.7-1.6 3.3.3 1.6 1.5 2.8 2.7 2.6 1.2-.2 1.9-1.7 1.6-3.3-.3-1.6-1.5-2.8-2.7-2.6Z"/><path d="M14.8 3.2c-1.2-.2-2.4 1-2.7 2.6-.3 1.6.4 3.1 1.6 3.3 1.2.2 2.4-1 2.7-2.6.3-1.6-.4-3.1-1.6-3.3Z"/></svg>
+      </span>
+      <div class="brand-copy">
+        <div class="title">宠物医院管理系统</div>
+        <div class="sub">温柔照护 · 清晰管理</div>
+      </div>
+    </div>
+    <div class="grow"></div>
+    <div class="db-pill" title="本地数据库状态"><span class="pulse" aria-hidden="true"></span><span id="dbInfo">正在连接本地数据库…</span></div>
+    <div class="header-actions">
+      <a class="btn sm" href="/api/v1/endpoints" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v2H6v12h12v-5h2v7H4V4Zm8.6 2.2 1.4-1.4 5 5-5 5-1.4-1.4 2.8-2.8H9v-2h6.4l-2.8-2.4Z"/></svg><span>API 文档</span></a>
+      <button class="btn primary sm" onclick="openCreate()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg><span>新增档案</span></button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero" aria-labelledby="heroTitle">
+    <div class="hero-copy">
+      <span class="eyebrow">Pet Hospital Workspace</span>
+      <h1 id="heroTitle">把每一次照护，都整理得清清楚楚</h1>
+      <p>集中查看宠物档案、就诊记录与消费明细，让前台、医生和主人之间的信息更顺畅。</p>
+      <div class="hero-actions">
+        <button class="btn primary" onclick="openCreate()">立即新增档案</button>
+        <button class="btn" onclick="document.querySelector('#q').focus()">查找档案</button>
+      </div>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 13.2c-2.5 0-5.2 2.1-5.2 4.5 0 1.5 1 2.5 2.5 2.5 1 0 1.7-.4 2.7-.4s1.7.4 2.7.4c1.5 0 2.5-1 2.5-2.5 0-2.4-2.7-4.5-5.2-4.5Z"/><path d="M6.7 8.1c-1.2-.3-2.5.9-2.8 2.6-.3 1.6.4 3 1.6 3.3 1.2.3 2.5-.9 2.8-2.6.3-1.6-.4-3-1.6-3.3Z"/><path d="M17.3 8.1c-1.2.3-1.9 1.7-1.6 3.3.3 1.7 1.6 2.9 2.8 2.6 1.2-.3 1.9-1.7 1.6-3.3-.3-1.7-1.6-2.9-2.8-2.6Z"/><path d="M9.2 3.2c-1.2.2-1.9 1.7-1.6 3.3.3 1.6 1.5 2.8 2.7 2.6 1.2-.2 1.9-1.7 1.6-3.3-.3-1.6-1.5-2.8-2.7-2.6Z"/><path d="M14.8 3.2c-1.2-.2-2.4 1-2.7 2.6-.3 1.6.4 3.1 1.6 3.3 1.2.2 2.4-1 2.7-2.6.3-1.6-.4-3.1-1.6-3.3Z"/></svg>
+    </div>
+  </section>
+
+  <section aria-labelledby="overviewTitle">
+    <div class="section-heading">
+      <div><span class="eyebrow">Overview</span><h2 id="overviewTitle">今天的档案工作台</h2></div>
+      <span class="section-meta">数据保存在本地单文件数据库</span>
+    </div>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section class="card filter-card" aria-labelledby="filterTitle">
+    <div class="card-h">
+      <div><span class="eyebrow">Search</span><h2 id="filterTitle">查找宠物档案</h2></div>
+      <span class="card-meta">支持宠物、主人、电话、疾病与病历关键词</span>
+    </div>
+    <div class="card-b">
+      <div class="filter-grid">
+        <div class="field">
+          <label for="q">关键词</label>
+          <input id="q" placeholder="如：肠胃炎、张三、138…" onkeydown="if(event.key==='Enter')load(1)">
+        </div>
+        <div class="field">
+          <label for="fSpecies">种类</label>
+          <select id="fSpecies" onchange="load(1)"><option value="">全部</option></select>
+        </div>
+        <div class="field">
+          <label for="fDoctor">主治医生</label>
+          <input id="fDoctor" placeholder="如：李医生" onkeydown="if(event.key==='Enter')load(1)">
+        </div>
+        <div class="field">
+          <label for="fStatus">就诊状态</label>
+          <select id="fStatus" onchange="load(1)"><option value="">全部</option></select>
+        </div>
+        <div class="field">
+          <label for="fSort">排序方式</label>
+          <select id="fSort" onchange="load(1)">
+            <option value="createdAt:desc">最新建档</option>
+            <option value="totalCost:desc">总花费从高到低</option>
+            <option value="totalCost:asc">总花费从低到高</option>
+            <option value="visitCount:desc">就诊次数最多</option>
+            <option value="name:asc">宠物姓名 A–Z</option>
+            <option value="ownerName:asc">主人姓名 A–Z</option>
+          </select>
+        </div>
+      </div>
+      <div class="filter-actions">
+        <button class="btn primary" onclick="load(1)">查询</button>
+        <button class="btn" onclick="resetFilters()">重置条件</button>
+        <div class="grow"></div>
+        <span class="muted" id="countInfo"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card table-card" aria-labelledby="listTitle">
+    <div class="card-h">
+      <div><span class="eyebrow">Records</span><h2 id="listTitle">宠物档案</h2></div>
+      <span class="card-meta">点击任意一行查看病历与消费明细</span>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>编号</th><th>宠物</th><th class="hide-sm">主人 / 电话</th>
+            <th>疾病</th><th class="hide-sm">主治医生</th><th>状态</th>
+            <th class="num">就诊</th><th class="num">总花费</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="pager" id="pager"></div>
+  </section>
+</main>
+
+<!-- 弹窗 -->
+<div class="mask" id="mask" onclick="if(event.target===this)closeModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <div class="modal-h">
+      <h3 id="mTitle">标题</h3>
+      <div class="grow"></div>
+      <button class="x" onclick="closeModal()" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-b" id="mBody"></div>
+    <div class="modal-f" id="mFoot"></div>
+  </div>
+</div>
+
+<div id="toast" aria-live="polite"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const yuan = n => '¥' + Number(n || 0).toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2});
+const API = '/api/v1';
+const ICONS = {
+  paw:[
+    'M12 13.2c-2.5 0-5.2 2.1-5.2 4.5 0 1.5 1 2.5 2.5 2.5 1 0 1.7-.4 2.7-.4s1.7.4 2.7.4c1.5 0 2.5-1 2.5-2.5 0-2.4-2.7-4.5-5.2-4.5Z',
+    'M6.7 8.1c-1.2-.3-2.5.9-2.8 2.6-.3 1.6.4 3 1.6 3.3 1.2.3 2.5-.9 2.8-2.6.3-1.6-.4-3-1.6-3.3Z',
+    'M17.3 8.1c-1.2.3-1.9 1.7-1.6 3.3 3.3 2.8 2.6 1.2-.3 1.9-1.7 1.6-3.3-.3-1.7-1.6-2.9-2.8-2.6Z',
+    'M9.2 3.2c-1.2.2-1.9 1.7-1.6 3.3.3 1.6 1.5 2.8 2.7 2.6 1.2-.2 1.9-1.7 1.6-3.3-.3-1.6-1.5-2.8-2.7-2.6Z',
+    'M14.8 3.2c-1.2-.2-2.4 1-2.7 2.6-.3 1.6.4 3.1 1.6 3.3 1.2.2 2.4-1 2.7-2.6.3-1.6-.4-3.1-1.6-3.3Z'
+  ],
+  pets:[
+    'M8.4 3.5c1.7 0 3 1.3 3 3 0 1.6-1.3 2.9-3 2.9-1.7 0-3-1.3-3-2.9 0-1.7 1.3-3 3-3Zm7.2 0c1.7 0 3 1.3 3 3 0 1.6-1.3 2.9-3 2.9-1.7 0-3-1.3-3-2.9 0-1.7 1.3-3 3-3ZM4.4 8.2c1.6 0 2.8 1.3 2.8 2.9 0 1.7-1.2 3-2.8 3-1.6 0-2.8-1.3-2.8-3 0-1.6 1.2-2.9 2.8-2.9Zm15.2 0c1.6 0 2.8 1.3 2.8 2.9 0 1.7-1.2 3-2.8 3-1.6 0-2.8-1.3-2.8-3 0-1.6 1.2-2.9 2.8-2.9ZM12 10.8c-3.1 0-6.3 2.5-6.3 5.4 0 1.8 1.3 3.1 3.1 3.1 1.2 0 2.1-.5 3.2-.5s2 .5 3.2.5c1.8 0 3.1-1.3 3.1-3.1 0-2.9-3.2-5.4-6.3-5.4Z'
+  ],
+  records:['M6 2h8l5 5v15H6V2Zm7 1.7V8h4.3L13 3.7ZM8 11h8v1.5H8V11Zm0 3.5h8V16H8v-1.5Zm0 3.5h5v1.5H8V18Z'],
+  charges:['M13 2 4 14h6l-1 8 9-12h-6l1-8Zm-1.2 4.2.3 3.1h3.1l-2.5 1.8.9 3-2.1-1.6-2.1 1.6.9-3L7.9 9.3h3.1l.8-3.1Z'],
+  average:[
+    'M4 4h16v2H6v12.2l6.2-6.2 1.4 1.4L6 21H4V4Z',
+    'M15 6h6v2h-6zM15 10h6v2h-6zM15 14h6v2h-6z'
+  ],
+  search:[
+    'm20.7 19.3-4.2-4.2a7.5 7.5 0 1 0-1.4 1.4l4.2 4.2 1.4-1.4Z',
+    'M10.5 16a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11Z'
+  ]
+};
+function icon(name){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');
+  for (const d of ICONS[name] || ICONS.paw) {
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d',d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+// ---------- DOM 辅助 ----------
+// 所有用户数据都通过 textContent 写入，由浏览器原生转义，避免 XSS。
+// 本文件不使用 innerHTML 渲染用户数据；图标只使用上面的静态 SVG 路径。
+function el(tag, attrs, children) {
+  const n = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    const v = attrs[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k.startsWith('on')) n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  if (children) for (const c of [].concat(children)) {
+    if (c == null || c === false) continue;
+    n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return n;
+}
+
+function fill(node, children) {
+  node.textContent = '';
+  for (const c of [].concat(children)) if (c != null && c !== false) node.appendChild(c);
+  return node;
+}
+
+// ---------- 状态 ----------
+let state = {page:1,pageSize:15,meta:null};
+
+// ---------- 请求 ----------
+async function api(path,opts){
+  const r=await fetch(API+path,Object.assign({headers:{'Content-Type':'application/json'}},opts));
+  let j;
+  try{j=await r.json()}catch{throw new Error('服务器返回异常')}
+  if(!r.ok)throw new Error(j.message||('HTTP '+r.status));
+  return j.data;
+}
+
+function toast(msg,kind){
+  const node=document.createElement('div');
+  node.className='toast '+(kind||'');node.textContent=msg;
+  $('#toast').appendChild(node);
+  setTimeout(()=>node.remove(),2600);
+}
+
+// ---------- 初始化 ----------
+async function boot(){
+  try{
+    const meta=await api('/meta');
+    state.meta=meta;
+    const sp=$('#fSpecies');meta.species.forEach(s=>sp.add(new Option(s,s)));
+    const st=$('#fStatus');meta.status.forEach(s=>st.add(new Option(s,s)));
+  }catch(e){toast('无法加载字典：'+e.message,'err')}
+
+  try{
+    const r=await fetch('/health');const j=await r.json();const h=j.data;
+    $('#dbInfo').textContent=`档案 ${h.petCount} 条 · 数据库 ${h.dbFile} · 运行 ${h.uptime}`;
+  }catch(e){/* 健康检查失败时保留连接提示 */}
+
+  await loadStats();await load(1);
+}
+
+// ---------- 统计 ----------
+async function loadStats(){
+  try{
+    const d=await api('/stats?top=5');
+    fill($('#stats'),[
+      ['宠物档案',d.totalPets,'条','pets','stat-purple'],
+      ['历史病历',d.totalRecords,'份','records','stat-teal'],
+      ['收费笔数',d.totalCharges,'笔','charges','stat-amber'],
+      ['总收入',yuan(d.totalRevenue),'','average','stat-rose'],
+      ['客单价',yuan(d.averageCost),'','pets','stat-blue']
+    ].map(([k,v,u,i,t])=>el('div',{class:'stat '+t},[
+      el('div',{class:'stat-icon'},[icon(i)]),
+      el('div',{class:'stat-copy'},[el('div',{class:'stat-label',text:k}),el('div',{class:'stat-value'},[String(v),u&&el('small',{text:u})])])
+    ])));
+  }catch(e){/* 统计失败不影响主流程 */}
+}
+
+// ---------- 列表 ----------
+async function load(page){
+  state.page=page||1;
+  const sort=$('#fSort').value.split(':');
+  const p=new URLSearchParams({page:state.page,pageSize:state.pageSize,sortBy:sort[0],order:sort[1]});
+  const q=$('#q').value.trim(),doc=$('#fDoctor').value.trim(),sp=$('#fSpecies').value,st=$('#fStatus').value;
+  if(q)p.set('q',q);if(doc)p.set('doctor',doc);if(sp)p.set('species',sp);if(st)p.set('status',st);
+
+  try{
+    const d=await api('/pets?'+p);render(d);
+    $('#countInfo').textContent=`共 ${d.total} 条 · 结果合计 ${yuan(d.totalCost)}`;
+  }catch(e){toast('查询失败：'+e.message,'err')}
+}
+
+function statusBadge(s){
+  const m={'待就诊':'b-wait','就诊中':'b-treat','住院中':'b-hosp','已康复':'b-ok','慢性病随访':'b-chronic'};
+  return el('span',{class:'badge '+(m[s]||'b-wait'),text:s});
+}
+
+function render(d){
+  const tb=fill($('#tbody'),[]);
+  if(!d.items.length){
+    tb.appendChild(el('tr',null,[el('td',{colspan:9,class:'empty'},[
+      el('strong',{text:'没有符合条件的档案'}),
+      '试试调整查询条件，或点击右上角「新增档案」'
+    ])]));
+  }else{
+    for(const p of d.items){
+      tb.appendChild(el('tr',{onclick:()=>openDetail(p.id)},[
+        el('td',{class:'muted','data-label':'编号',text:p.id}),
+        el('td',{ 'data-label':'宠物'},[el('span',{class:'name',text:p.name}),el('span',{class:'species',text:p.species})]),
+        el('td',{class:'owner','data-label':'主人 / 电话'},[el('span',{text:p.ownerName}),el('span',{class:'phone',text:p.ownerPhone})]),
+        el('td',{'data-label':'疾病',text:p.disease}),
+        el('td',{class:'hide-sm','data-label':'主治医生',text:p.doctor}),
+        el('td',{'data-label':'状态'},[statusBadge(p.status)]),
+        el('td',{class:'num','data-label':'就诊次数',text:String(p.visitCount)}),
+        el('td',{class:'num','data-label':'总花费'},[el('strong',{text:yuan(p.totalCost)})]),
+        el('td',{onclick:e=>e.stopPropagation(),'data-label':'操作'},[el('button',{class:'btn sm',text:'编辑',onclick:()=>openEdit(p.id)})])
+      ]));
+    }
+  }
+
+  const pg=fill($('#pager'),[]);
+  if(d.totalPages<=1)return;
+  pg.appendChild(el('button',{class:'btn sm',text:'上一页',disabled:d.page<=1,onclick:()=>load(d.page-1)}));
+  pg.appendChild(el('span',{class:'muted',text:`第 ${d.page} / ${d.totalPages} 页`}));
+  pg.appendChild(el('button',{class:'btn sm',text:'下一页',disabled:d.page>=d.totalPages,onclick:()=>load(d.page+1)}));
+}
+
+function resetFilters(){
+  $('#q').value='';$('#fDoctor').value='';$('#fSpecies').value='';$('#fStatus').value='';$('#fSort').value='createdAt:desc';load(1);
+}
+
+// ---------- 弹窗基座 ----------
+function openModal(title,body,foot){
+  $('#mTitle').textContent=title;
+  fill($('#mBody'),[typeof body==='string'?el('div',{class:'empty',text:body}):body]);
+  fill($('#mFoot'),[typeof foot==='string'?el('span',{text:foot}):foot]);
+  $('#mask').classList.add('on');
+}
+function closeModal(){$('#mask').classList.remove('on')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+
+// ---------- 表单字段 ----------
+function field(labelText,inputNode){return el('div',{class:'field'},[el('label',{text:labelText}),inputNode])}
+function selectOf(list,cur,id){
+  const s=el('select',{id});
+  for(const v of list)s.append(el('option',{value:v,text:v,selected:v===cur}));
+  if(cur&&!list.includes(cur))s.append(el('option',{value:cur,text:cur,selected:true}));
+  return s;
+}
+function inputOf(id,val,placeholder,type){
+  const attrs={id,value:val??'',placeholder:placeholder||'',type:type||'text'};
+  if(type==='number')attrs.min='0';
+  return el('input',attrs);
+}
+function petForm(p){
+  p=p||{};
+  const sp=state.meta?.species||['犬','猫','兔','鸟','仓鼠','爬宠','其他'];
+  const st=state.meta?.status||['待就诊','就诊中','住院中','已康复','慢性病随访'];
+  const sections=[
+    ['宠物信息','基础资料与识别信息',[
+      field('宠物姓名 *',inputOf('f_name',p.name,'如：旺财')),
+      field('种类',selectOf(sp,p.species,'f_species')),
+      field('品种',inputOf('f_breed',p.breed,'如：金毛')),
+      field('性别',selectOf(['公','母'],p.gender,'f_gender')),
+      field('月龄',inputOf('f_ageMonths',p.ageMonths||0,'','number')),
+      field('毛色',inputOf('f_color',p.color)),
+      field('芯片号',inputOf('f_chipNo',p.chipNo)),
+      field('过敏史',inputOf('f_allergy',p.allergy))
+    ]],
+    ['主人信息','方便回访与联系',[
+      field('主人姓名 *',inputOf('f_ownerName',p.ownerName,'如：张三')),
+      field('电话 *',inputOf('f_ownerPhone',p.ownerPhone,'如：13800001111')),
+      field('住址',inputOf('f_ownerAddr',p.ownerAddr))
+    ]],
+    ['诊疗信息','当前诊断与就诊进度',[
+      field('疾病 / 诊断 *',inputOf('f_disease',p.disease,'如：急性肠胃炎')),
+      field('主治医生 *',inputOf('f_doctor',p.doctor,'如：李医生')),
+      field('就诊状态',selectOf(st,p.status,'f_status')),
+      field('备注',inputOf('f_note',p.note))
+    ]]
+  ];
+  return el('div',{class:'form-sections'},sections.map(([title,desc,fields],index)=>el('section',{class:'form-section'},[
+    el('div',{class:'section-heading'},[el('div',null,[el('span',{class:'section-index',text:String(index+1).padStart(2,'0')}),el('h3',{text:title})]),el('span',{class:'section-copy',text:desc})]),
+    el('div',{class:'form-grid'},fields)
+  ])));
+}
+function readForm(){
+  const v=id=>$('#f_'+id).value.trim();
+  return{name:v('name'),species:v('species'),breed:v('breed'),gender:v('gender'),ageMonths:+v('ageMonths')||0,color:v('color'),chipNo:v('chipNo'),allergy:v('allergy'),ownerName:v('ownerName'),ownerPhone:v('ownerPhone'),ownerAddr:v('ownerAddr'),disease:v('disease'),doctor:v('doctor'),status:v('status'),note:v('note')};
+}
+
+// ---------- 新增 ----------
+function openCreate(){openModal('新增宠物档案',petForm(null),el('div',{class:'row'},[el('button',{class:'btn',text:'取消',onclick:closeModal}),el('button',{class:'btn primary',text:'保存档案',onclick:e=>submitCreate(e.currentTarget)})]))}
+async function submitCreate(btn){
+  btn.disabled=true;
+  try{const d=await api('/pets',{method:'POST',body:JSON.stringify(readForm())});closeModal();toast('新增成功，编号 '+d.id,'ok');await loadStats();await load(1)}
+  catch(e){toast('保存失败：'+e.message,'err')}
+  finally{btn.disabled=false}
+}
+
+// ---------- 编辑 ----------
+async function openEdit(id){
+  try{
+    const p=await api('/pets/'+encodeURIComponent(id));
+    openModal('编辑档案 · '+p.id,petForm(p),el('div',{class:'row',style:'width:100%'},[
+      el('button',{class:'btn danger',text:'删除档案',onclick:()=>removePet(p.id)}),
+      el('div',{class:'grow'}),el('button',{class:'btn',text:'取消',onclick:closeModal}),
+      el('button',{class:'btn primary',text:'保存修改',onclick:e=>submitEdit(p.id,e.currentTarget)})
+    ]));
+  }catch(e){toast('加载失败：'+e.message,'err')}
+}
+async function submitEdit(id,btn){
+  btn.disabled=true;
+  try{await api('/pets/'+encodeURIComponent(id),{method:'PUT',body:JSON.stringify(readForm())});closeModal();toast('修改已保存','ok');await loadStats();await load(state.page)}
+  catch(e){toast('保存失败：'+e.message,'err')}
+  finally{btn.disabled=false}
+}
+
+// ---------- 删除 ----------
+async function removePet(id){
+  if(!confirm(`确定删除档案 ${id} 吗？\n该操作不可撤销。`))return;
+  try{await api('/pets/'+encodeURIComponent(id),{method:'DELETE'});closeModal();toast('已删除 '+id,'ok');await loadStats();await load(1)}
+  catch(e){toast('删除失败：'+e.message,'err')}
+}
+
+// ---------- 详情（病历 + 收费）----------
+async function openDetail(id){
+  openModal('加载中…',el('div',{class:'empty',text:'正在读取档案…'}),null);
+  try{
+    const [p,s]=await Promise.all([api('/pets/'+encodeURIComponent(id)),api('/pets/'+encodeURIComponent(id)+ '/summary')]);
+    const recs=p.records||[],chgs=p.charges||[];
+
+    const profile=el('div',{class:'detail-profile'},[
+      el('div',{class:'profile-icon'},[icon('paw')]),
+      el('div',{class:'profile-copy'},[el('strong',{text:p.name}),el('span',{text:'档案编号 '+p.id})]),
+      el('div',{class:'grow'}),statusBadge(p.status)
+    ]);
+    const info=(k,v)=>el('div',{class:'field'},[el('label',{text:k}),el('div',{style:'padding:5px 0 2px'},[v||el('span',{class:'muted',text:'—'})])]);
+    const infoGrid=el('div',{class:'form-grid'},[
+      info('种类 / 品种',p.species+(p.breed?' · '+p.breed:'')),
+      info('性别 / 月龄',(p.gender||'—')+' · '+(p.ageMonths||0)+' 个月'),
+      info('主人',p.ownerName),info('电话',p.ownerPhone),
+      info('疾病',el('span',null,[p.disease,' ',statusBadge(p.status)])),
+      info('主治医生',p.doctor),info('过敏史',p.allergy),info('芯片号',p.chipNo)
+    ]);
+
+    const stat=(k,v,unit,i,t)=>{
+      const value=el('div',{class:'stat-value'},[v]);
+      if(unit)value.appendChild(el('small',{text:unit}));
+      return el('div',{class:'stat '+t},[
+        el('div',{class:'stat-icon'},[icon(i)]),
+        el('div',{class:'stat-copy'},[el('div',{class:'stat-label',text:k}),value])
+      ]);
+    };
+    const statCards=el('div',{class:'detail-stats'},[
+      stat('在医院总花费',yuan(p.totalCost),'','charges','stat-rose'),
+      stat('就诊次数',String(p.visitCount),'次','records','stat-teal'),
+      stat('单次均价',yuan(s.avgCostPerVisit),'','average','stat-purple'),
+      stat('收费笔数',String(chgs.length),'笔','charges','stat-amber')
+    ]);
+
+    let recBody;
+    if (recs.length) {
+      recBody=recs.map(r=>el('tr',null,[
+        el('td',{text:r.visitDate}),el('td',{text:r.doctor}),
+        el('td',null,[r.diagnosis,r.symptoms&&el('div',{class:'muted'},['症状：'+r.symptoms]),r.treatment&&el('div',{class:'muted'},['处置：'+r.treatment])]),
+        el('td',{class:'num',text:r.charge?yuan(r.charge):'-'})
+      ]));
+    } else {
+      recBody=[el('tr',null,[el('td',{colspan:4,class:'muted',text:'暂无病历'})])];
+    }
+    let chgBody;
+    if (chgs.length) {
+      chgBody=chgs.map(c=>el('tr',null,[
+        el('td',{text:c.date}),el('td',{text:c.item}),el('td',null,[el('span',{class:'badge b-wait',text:c.category})]),el('td',{text:c.doctor}),el('td',{class:'num',text:yuan(c.amount)})
+      ]));
+    } else {
+      chgBody=[el('tr',null,[el('td',{colspan:5,class:'muted',text:'暂无消费记录'})])];
+    }
+    const table=(heads,rows)=>el('div',{class:'table-wrap'},[el('table',{class:'mini'},[el('thead',null,[el('tr',null,heads.map(h=>el('th',{class:h.num?'num':null,text:h.text})))]),el('tbody',null,rows)])]);
+
+    openModal(p.name+' · '+p.id,el('div',null,[
+      profile,infoGrid,
+      el('div',{class:'sec-t',text:'费用汇总'}),statCards,
+      el('div',{class:'sec-t',text:`历史病历（${recs.length}）`}),table([{text:'就诊日期'},{text:'医生'},{text:'诊断 / 处置'},{text:'费用',num:true}],recBody),
+      el('div',{class:'sec-t',text:`消费明细（${chgs.length}）`}),table([{text:'日期'},{text:'项目'},{text:'分类'},{text:'医生'},{text:'金额',num:true}],chgBody)
+    ]),el('div',{class:'row',style:'width:100%'},[el('button',{class:'btn',text:'编辑档案',onclick:()=>openEdit(p.id)}),el('div',{class:'grow'}),el('button',{class:'btn primary',text:'关闭',onclick:closeModal})]));
+  }catch(e){openModal('出错了',el('div',{class:'empty',text:e.message}),el('button',{class:'btn',text:'关闭',onclick:closeModal}))}
+}
+
+boot();
+</script>
+</body>
+</html>

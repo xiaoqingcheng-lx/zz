@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pet-hospital-mcp"
+version = "0.1.0"
+description = "MCP server that exposes the existing Go Pet Hospital REST API to AI agents (MCP 2026-07-28, official Python SDK 2.x MCPServer, stateless Streamable HTTP)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    # Official Model Context Protocol Python SDK, 2.x line: provides `mcp.server.MCPServer`.
+    "mcp==2.0.0",
+    # HTTP client for the upstream Go REST API.
+    "httpx>=0.28,<1",
+    # Input / success-output / error-output models.
+    "pydantic>=2.11,<3",
+    # ASGI server that hosts the Starlette app produced by MCPServer.streamable_http_app().
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+pet-hospital-mcp = "pet_hospital_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-ra"

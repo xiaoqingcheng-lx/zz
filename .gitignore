@@ -1,0 +1,21 @@
+# 运行环境（体积大，不进仓库）
+AnythingLLMMCP/
+AnythingLLMServer/
+pethospitalMCP/_venvtest/
+
+# 工作区数据
+.workbuddy/
+**/.workbuddy/
+
+# 构建产物 / 二进制
+*.exe
+*.zip
+*.dll
+__pycache__/
+*.pyc
+node_modules/
+
+# 其他
+.git/
+Thumbs.db
+Desktop.ini

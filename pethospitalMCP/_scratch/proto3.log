@@ -1,0 +1,27 @@
+INFO:     Started server process [32576]
+INFO:     Waiting for application startup.
+StreamableHTTP session manager started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8904 (Press CTRL+C to quit)
+INFO:     127.0.0.1:49314 - "GET /health HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': 'ok', 'type': 'text'}], 'isError': False, 'resultType': 'complete', 'structuredContent': {'result': 'ok'}, '_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'Proto3', 'ver
+INFO:     127.0.0.1:49315 - "POST /mcp HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': "Error executing tool flat_params: 1 validation error for flat_paramsArguments\nspecies\n  Input should be '犬' or '猫' [type=literal_error, input_value='恐龙', input_type=str]\n    
+INFO:     127.0.0.1:49316 - "POST /mcp HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': 'ok', 'type': 'text'}], 'isError': False, 'resultType': 'complete', 'structuredContent': {'result': 'ok'}, '_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'Proto3', 'ver
+INFO:     127.0.0.1:49335 - "POST /mcp HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': "Error executing tool flat_params: 1 validation error for flat_paramsArguments\npage\n  Input should be a valid integer, unable to parse string as an integer [type=int_parsing, i
+INFO:     127.0.0.1:49336 - "POST /mcp HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': 'Error executing tool flat_params: 1 validation error for flat_paramsArguments\npage\n  Input should be greater than or equal to 1 [type=greater_than_equal, input_value=0, input_
+INFO:     127.0.0.1:49337 - "POST /mcp HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': 'Error executing tool flat_params: 1 validation error for flat_paramsArguments\npage\n  Input should be a valid integer, got a number with a fractional part [type=int_from_float,
+INFO:     127.0.0.1:49338 - "POST /mcp HTTP/1.1" 200 OK
+MW: tools/list dict {'cacheScope': 'private', 'resultType': 'complete', 'tools': [{'description': 'Flat params.', 'inputSchema': {'type': 'object', 'properties': {'species': {'anyOf': [{'enum': ['犬', '猫'], 'type': 'strin
+MW: tools/call dict {'content': [{'text': "Error executing tool flat_params: 1 validation error for flat_paramsArguments\npage\n  Input should be a valid integer, unable to parse string as an integer [type=int_parsing, i
+INFO:     127.0.0.1:49339 - "POST /mcp HTTP/1.1" 200 OK

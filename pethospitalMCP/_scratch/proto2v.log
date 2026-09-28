@@ -1,0 +1,15 @@
+INFO:     Started server process [32692]
+INFO:     Waiting for application startup.
+StreamableHTTP session manager started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8903 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51043 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51043 - "POST http%3A//127.0.0.1%3A8903/mcp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51045 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51047 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49293 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49293 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49293 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49293 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49294 - "POST / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49295 - "POST / HTTP/1.1" 404 Not Found
