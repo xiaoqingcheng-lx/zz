@@ -7,6 +7,10 @@ pethospitalMCP/_venvtest/
 .workbuddy/
 **/.workbuddy/
 
+# 敏感配置
+config.ini
+_secret.py
+
 # 构建产物 / 二进制
 *.exe
 *.zip
