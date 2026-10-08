@@ -1,7 +1,11 @@
-# 运行环境（体积大，不进仓库）
-AnythingLLMMCP/
-AnythingLLMServer/
+# 运行环境（体积大，不进仓库）——只排除运行时本体，代码照常入库
+AnythingLLMMCP/git/
+AnythingLLMMCP/node/
+AnythingLLMServer/Git/
 pethospitalMCP/_venvtest/
+
+# 内含 AnythingLLM 的 API Key，确认后再决定是否上传
+AnythingLLMServer/anythingllm-upload/index.html
 
 # 工作区数据
 .workbuddy/
