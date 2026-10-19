@@ -1,0 +1,120 @@
+%% practice02 启动文件架构图
+%% 文件：agent/practice02/chat-stream-tool-fileops.py
+%% 说明：流式对话 + 模型自主工具调用（function calling）+ 本地文件操作（经 MCP stdio）
+%% 阅读顺序：⓪配置 → ①启动 → ②交互 → ③编排 → ④模型 ⇄ DashScope
+%%           → ⑤桥接 → ⑥MCP客户端 ⇄ ⑦MCP服务端 → ⑧工具 → 结果回灌 ③（循环 ≤12 轮）
+flowchart TB
+
+    %% ===================== ⓪ 配置层 =====================
+    subgraph S0["⓪ 配置层"]
+        direction LR
+        F1["config.ini<br/>base_url · api_key · model"]
+        F2["_secret.py<br/>内置凭据兜底"]
+    end
+
+    %% ===================== ① 启动阶段 =====================
+    subgraph S1["① 启动阶段 · main()"]
+        direction LR
+        P1["load_config()<br/>读本目录 → 上级目录 config.ini"]
+        P2["stdio_client<br/>拉起 server.py 子进程"]
+        P3["initialize() + list_tools()<br/>握手 · 拿到 11 个工具定义"]
+    end
+
+    %% ===================== ② 交互层 =====================
+    subgraph S2["② 交互层 · REPL 主循环"]
+        direction LR
+        U1["input 读取用户输入"]
+        U2["内置命令<br/>/tools · /reset · /help · exit"]
+        U3["history 多轮上下文<br/>user · assistant · tool"]
+    end
+
+    %% ===================== ③ 编排层 =====================
+    subgraph S3["③ 编排层 · run_turn()"]
+        direction LR
+        O1["user 消息入 history"]
+        O2["工具循环：结果回灌后再问模型<br/>最多 12 轮（防死循环）"]
+        O3["无 tool_calls → 正文写回 history<br/>回到 ② 等下一次输入"]
+    end
+
+    %% ===================== ④ 模型层 =====================
+    subgraph S4["④ 模型层 · stream_once()"]
+        direction LR
+        M1["POST /chat/completions<br/>stream = true · tools 随请求带上"]
+        M2["解析 SSE 帧<br/>content 逐字打印"]
+        M3["delta.tool_calls<br/>按 index 增量拼装"]
+    end
+
+    API[("DashScope<br/>qwen-plus")]
+
+    %% ===================== ⑤ 协议桥接 =====================
+    subgraph S5["⑤ 协议桥接"]
+        direction LR
+        B1["to_openai_tool()<br/>MCP schema → OpenAI tools"]
+        B2["call_tool()<br/>JSON 字符串 → dict"]
+    end
+
+    %% ===================== ⑥ MCP 客户端 =====================
+    subgraph S6["⑥ MCP 客户端 · mcp SDK"]
+        C2["ClientSession<br/>call_tool()"]
+    end
+
+    %% ===================== ⑦ MCP 服务端 =====================
+    subgraph S7["⑦ MCP 服务端 · server.py"]
+        direction LR
+        S1N["MCPServer<br/>name = practice02"]
+        S2N["register_tools()<br/>统一注册入口"]
+    end
+
+    %% ===================== ⑧ 工具层 =====================
+    subgraph S8["⑧ 工具层 · tools/"]
+        direction LR
+        T1["get_date.py<br/>getDate"]
+        T2["is_leap_year.py<br/>isleapyear"]
+        T3["file_ops.py · 9 个文件工具<br/>get_cwd · list_files · get_file_type<br/>read_file · create_file · update_file<br/>create_dir · delete_dir · delete_file"]
+    end
+
+    %% ===================== ⑨ 本地资源 =====================
+    RES["本机资源<br/>文件系统 · date.exe"]
+
+    %% ---------- 主链路（自上而下） ----------
+    S0 ==>|"读取 key / model"| S1
+    S1 ==>|"进入 REPL"| S2
+    S2 ==>|"普通提问"| S3
+    S3 ==>|"messages + history"| S4
+
+    S4 <==>|"SSE 流式响应"| API
+
+    S4 ==>|"delta.tool_calls 有调用"| S5
+    S5 ==>|"解析参数后调用"| S6
+    S6 <==>|"JSON-RPC over stdio"| S7
+    S7 ==>|"register_tools 注册<br/>分发到具体工具"| S8
+
+    %% ---------- 循环说明（不再画回边，保证层次图干净） ----------
+    LOOP["⟲ 工具调用循环<br/>⑧ 的文本结果以 role = tool 回灌 ③<br/>再带着结果请求 ④ 模型 · 最多 12 轮"]
+
+    S8 -.-> LOOP
+    S8 -.-> RES
+
+    %% ---------- 样式 ----------
+    classDef cfg fill:#F1F1F1,stroke:#8A8A8A,stroke-width:1.5px,color:#242424
+    classDef startup fill:#E8F1FF,stroke:#4C7FD1,stroke-width:1.5px,color:#10233F
+    classDef ui fill:#FFF4E2,stroke:#D08A2C,stroke-width:1.5px,color:#3A2A10
+    classDef orch fill:#FDEDE4,stroke:#C4663B,stroke-width:1.5px,color:#3A1E10
+    classDef model fill:#E9F7EA,stroke:#3E9B4F,stroke-width:1.5px,color:#10321A
+    classDef bridge fill:#F2ECFF,stroke:#7C5CC4,stroke-width:1.5px,color:#221541
+    classDef mcp fill:#FFECEF,stroke:#C4455C,stroke-width:1.5px,color:#3D121A
+    classDef tool fill:#E6F7F8,stroke:#2F8F96,stroke-width:1.5px,color:#0E2E31
+    classDef api fill:#DFF3FF,stroke:#2C7FA8,stroke-width:2px,color:#0B2C3D
+    classDef res fill:#FBE9E7,stroke:#B0564A,stroke-width:1.5px,color:#331713
+
+    class F1,F2 cfg
+    class P1,P2,P3 startup
+    class U1,U2,U3 ui
+    class O1,O2,O3 orch
+    class M1,M2,M3 model
+    class B1,B2 bridge
+    class C2,S1N,S2N mcp
+    class T1,T2,T3 tool
+    class API api
+    class RES res
+    class LOOP orch

@@ -27,7 +27,10 @@
 
 ```
 practice02/
+├── chat-stream-tool-fileops.py  # 启动文件：流式对话 + 模型自主工具调用
+├── demo.py                # 演示客户端：按命令手动调工具
 ├── server.py              # 装配 MCPServer，注册全部工具
+├── chat-stream-tool-fileops-architecture.mmd  # 启动文件的 Mermaid 架构图
 ├── tools/
 │   ├── __init__.py        # 工具登记处（新增工具改这里）
 │   ├── get_date.py        # getDate
@@ -36,6 +39,26 @@ practice02/
 ├── requirements.txt
 └── README.md
 ```
+
+## 启动文件：chat-stream-tool-fileops.py
+
+把「流式对话 + 工具调用 + 文件操作」接成一条链路，是整个 practice02 的入口：
+
+1. 读取 config.ini（本目录 → 上级目录 → 内置 `_secret.py` 兜底）；
+2. stdio 拉起 `server.py`，`initialize` + `list_tools` 拿到 11 个工具；
+3. `to_openai_tool()` 把 MCP schema 转成 OpenAI function 格式；
+4. DashScope 流式请求（`stream=true`），`delta.content` 逐字打印；
+5. 模型给出 `tool_calls` 时解析参数、经 `ClientSession.call_tool()` 执行，
+   结果以 `role=tool` 回灌，循环直到模型不再调工具（上限 12 轮防死循环）。
+
+与 `demo.py` 的区别：demo 是「人按命令调工具」，启动文件是「模型自己决定调哪个工具」。
+
+```bat
+.venv\Scripts\python.exe chat-stream-tool-fileops.py
+```
+
+对话中可用：`/tools` 看工具、`/reset` 清上下文、`/help` 看说明、`exit` 退出。
+架构图见 `chat-stream-tool-fileops-architecture.mmd`（可粘贴到 mermaid.live 查看）。
 
 ## 安装
 
