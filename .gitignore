@@ -3,6 +3,8 @@ AnythingLLMMCP/git/
 AnythingLLMMCP/node/
 AnythingLLMServer/Git/
 pethospitalMCP/_venvtest/
+.venv/
+**/.venv/
 
 # 含真实 API Key 的文件，不进仓库（另存有本地备份）
 AnythingLLMServer/anythingllm-upload/index.html
