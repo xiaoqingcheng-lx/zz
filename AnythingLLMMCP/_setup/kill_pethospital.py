@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
-"""结束 pethospital.exe，然后把最新的 pet.db 同步到 D:\\LLM。"""
+"""结束 pethospital.exe，进程冻结后把 pet.db 同步到目标位置。
+
+用法：
+    python kill_pethospital.py <源 pet.db> <目标 pet.db>
+
+例：
+    python kill_pethospital.py .\\data\\pet.db D:\\backup\\pet.db
+"""
+import os
 import shutil
 import subprocess
 import sys
 import time
-
-SRC_DB = r"C:\Users\lx\OneDrive\Desktop\windows\data\pet.db"
-DST_DB = r"D:\LLM\data\pet.db"
 
 
 def list_pids():
@@ -22,26 +27,38 @@ def list_pids():
     return pids
 
 
-pids = list_pids()
-print("找到进程 PID:", pids if pids else "无（未运行）")
+def main():
+    if len(sys.argv) < 3:
+        sys.exit("用法：python kill_pethospital.py <源 pet.db> <目标 pet.db>")
+    src_db, dst_db = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
 
-for pid in pids:
-    k = subprocess.run(
-        ["taskkill", "/PID", pid, "/F"],
-        capture_output=True, text=True, encoding="gbk", errors="replace",
-    )
-    print(f"  结束 PID {pid} -> rc={k.returncode} {(k.stdout or k.stderr).strip()}")
+    if not os.path.isfile(src_db):
+        sys.exit("源文件不存在：%s" % src_db)
 
-time.sleep(2)
+    pids = list_pids()
+    print("找到进程 PID:", pids if pids else "无（未运行）")
 
-left = list_pids()
-print("剩余进程:", left if left else "已全部结束")
+    for pid in pids:
+        k = subprocess.run(
+            ["taskkill", "/PID", pid, "/F"],
+            capture_output=True, text=True, encoding="gbk", errors="replace",
+        )
+        print("  结束 PID %s -> rc=%s %s" % (pid, k.returncode, (k.stdout or k.stderr).strip()))
 
-if left:
-    print("进程未彻底结束，中止同步")
-    sys.exit(1)
+    time.sleep(2)
 
-# 进程停了，源 pet.db 已冻结，同步最新版本到 D 盘
-shutil.copy2(SRC_DB, DST_DB)
-import os
-print("pet.db 已同步 ->", DST_DB, os.path.getsize(DST_DB), "字节")
+    left = list_pids()
+    print("剩余进程:", left if left else "已全部结束")
+    if left:
+        print("进程未彻底结束，中止同步")
+        return 1
+
+    # 进程停了，源数据库已冻结，同步最新版本
+    os.makedirs(os.path.dirname(dst_db) or ".", exist_ok=True)
+    shutil.copy2(src_db, dst_db)
+    print("pet.db 已同步 ->", dst_db, os.path.getsize(dst_db), "字节")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

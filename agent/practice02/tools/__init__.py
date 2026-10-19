@@ -8,9 +8,9 @@
 工具清单：
 - ``getDate``     读本机 date 命令，返回当前日期时间
 - ``isleapyear``  用 Python 代码判断年份是否闰年
-- 文件操作组（``file_ops.py``）：
+- 文件操作组（``file_ops.py``，共 9 个）：
   ``get_cwd`` / ``list_files`` / ``get_file_type`` / ``read_file`` /
-  ``create_file`` / ``update_file``
+  ``create_file`` / ``update_file`` / ``create_dir`` / ``delete_dir`` / ``delete_file``
 """
 
 from __future__ import annotations

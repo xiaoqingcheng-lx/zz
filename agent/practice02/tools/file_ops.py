@@ -83,6 +83,37 @@ def _human_size(num: int) -> str:
     return "%.1f GB" % size
 
 
+def _append_bytes(target: Path, content: str) -> int:
+    """按原文件编码追加内容，返回本次写入的字节数。
+
+    关键：只在文件末尾写新字节，不重写已有内容。早先的实现是
+    「整体解码 → 拼接 → 重新编码写回」，遇到 GBK 编码的文件会把原文
+    替换成 U+FFFD（不可逆损坏），这里改成二进制追加 + 沿用原编码。
+    """
+    has_data = target.stat().st_size > 0
+    encoding = "utf-8"
+    if has_data:
+        with target.open("rb") as f:
+            _, detected = _decode(f.read(4096))
+        if not detected.startswith("utf-8"):     # gbk 等按原编码写，免得追加内容成乱码
+            encoding = detected
+
+    try:
+        payload = content.encode(encoding)
+    except (UnicodeEncodeError, LookupError):     # 原编码打不出来的字，回落 UTF-8
+        payload = content.encode("utf-8")
+
+    if has_data:
+        with target.open("rb") as f:              # 末尾没换行就先补一个，避免粘成一行
+            f.seek(-1, os.SEEK_END)
+            if f.read(1) not in (b"\n", b"\r"):
+                payload = b"\n" + payload
+
+    with target.open("ab") as f:
+        f.write(payload)
+    return len(payload)
+
+
 def _guard_write(target: Path) -> str | None:
     """写操作的安全检查；返回非 None 表示拒绝原因。"""
     low = str(target).lower()
@@ -404,20 +435,17 @@ def _register_update_file(server) -> None:
 
         try:
             if mode == "append":
-                existing = ""
-                if target.stat().st_size:
-                    existing = target.read_bytes().decode("utf-8", "replace")
-                sep = "" if (not existing or existing.endswith("\n")) else "\n"
-                target.write_text(existing + sep + content, encoding="utf-8", newline="")
+                written = _append_bytes(target, content)
             else:
                 target.write_text(content, encoding="utf-8", newline="")
+                written = len(payload)
         except OSError as exc:
             return "编辑失败：%s" % exc
 
         action = "追加" if mode == "append" else "覆盖"
         total = target.stat().st_size
         return "已%s：%s（本次写入 %d 字节，文件现有 %s）" % (
-            action, target, len(payload), _human_size(total))
+            action, target, written, _human_size(total))
 
 
 # ---------------------------------------------------------------- 7. 建目录

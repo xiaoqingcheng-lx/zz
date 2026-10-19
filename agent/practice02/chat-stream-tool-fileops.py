@@ -306,7 +306,8 @@ async def main() -> None:
                     break
                 if prompt == "/tools":
                     for t in listed.tools:
-                        print("  · %-13s %s" % (t.name, (t.description or "").splitlines()[0]))
+                        brief = (t.description or "").strip().splitlines()
+                        print("  · %-13s %s" % (t.name, brief[0] if brief else "（无说明）"))
                     print()
                     continue
                 if prompt == "/reset":
@@ -317,11 +318,14 @@ async def main() -> None:
                     print(HELP)
                     continue
 
+                mark = len(history)          # 记个位置，失败时整段回滚
                 try:
                     await run_turn(session, history, prompt, tools, cfg, typing)
                 except RuntimeError as exc:
                     print("出错了：%s\n" % exc)
-                    history.pop()            # 这一轮没成功，别把半截记进历史
+                    # 不能只 pop 一条：这一轮可能已经写入 user + assistant(tool_calls)
+                    # + 若干 tool 消息，留下残缺的 tool_calls 会让下次请求 400
+                    del history[mark:]
                 print()
 
     print("再见。")

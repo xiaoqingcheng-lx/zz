@@ -1,9 +1,9 @@
 """practice02：MCP 练习服务。
 
-对外提供两组工具：
+对外提供两组工具（共 11 个）：
 - 时间与日期：``getDate``（调本机 date 命令）、``isleapyear``（Python 计算闰年）
 - 本地文件操作：``get_cwd``、``list_files``、``get_file_type``、``read_file``、
-  ``create_file``、``update_file``
+  ``create_file``、``update_file``、``create_dir``、``delete_dir``、``delete_file``
 
 运行（stdio 传输，供 MCP 客户端拉起）：
     .venv\\Scripts\\python.exe server.py

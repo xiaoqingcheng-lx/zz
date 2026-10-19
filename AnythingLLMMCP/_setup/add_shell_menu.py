@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
-"""为解压版 Git 补上资源管理器右键菜单：Git Bash Here / Git GUI Here（仅写 HKCU，无需管理员）。"""
+"""为解压版 Git 补上资源管理器右键菜单：Git Bash Here / Git GUI Here（仅写 HKCU，无需管理员）。
+
+Git 目录按脚本位置推算（AnythingLLMMCP/git），换机器/换路径都不用改代码。
+"""
+from pathlib import Path
+
 import winreg
 
-GIT = r"D:\LLM\AnythingLLMMCP\git"
+GIT = str(Path(__file__).resolve().parents[1] / "git")     # AnythingLLMMCP/git
 
 ENTRIES = [
     # (父键, 项名, 显示名, 图标, 命令)

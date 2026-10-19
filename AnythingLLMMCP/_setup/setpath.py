@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
-"""把 tools\node 和 tools\git\cmd 追加到当前用户 PATH（去重、保持 REG_EXPAND_SZ），并广播环境变更。"""
+r"""把 AnythingLLMMCP\node 和 AnythingLLMMCP\git\cmd 追加到当前用户 PATH（去重、保持 REG_EXPAND_SZ），并广播环境变更。
+
+路径按脚本位置推算，换机器/换目录都不用改代码。
+"""
 import ctypes
 import winreg
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]        # AnythingLLMMCP/
 ADD = [
-    r"D:\LLM\AnythingLLMMCP\node",
-    r"D:\LLM\AnythingLLMMCP\git\cmd",
+    str(ROOT / "node"),
+    str(ROOT / "git" / "cmd"),
 ]
 
 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
