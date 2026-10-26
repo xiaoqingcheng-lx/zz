@@ -59,6 +59,9 @@ class ChatService:
         except SystemExit as e:                # ask_stream 用 sys.exit 报错
             yield f"[出错] {e}"
             return
+        except Exception as e:                 # 网络异常/超时等，不让异常炸掉界面线程
+            yield f"[出错] 请求失败：{e}"
+            return
         if parts:
             self.history.append({"role": "user", "content": prompt})
             self.history.append({"role": "assistant", "content": "".join(parts)})

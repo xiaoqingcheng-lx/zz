@@ -8,8 +8,10 @@ conhost 老式控制台对 Textual 支持差（易冻结/未响应），
 from textual_serve.server import Server
 
 if __name__ == "__main__":
+    import sys
+    # 用当前解释器的绝对路径，避免 PATH 上的 python 缺少 textual
     server = Server(
-        "python main.py",
+        f'"{sys.executable}" main.py',
         host="127.0.0.1",
         port=8766,
         title="大模型对话 (TUI)",

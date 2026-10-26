@@ -77,22 +77,35 @@ class ChatTUI(App):
             self.exit()
             return
         log = self.query_one("#chatlog", RichLog)
+        prompt_input = self.query_one("#prompt", Input)
+        prompt_input.disabled = True           # 流式期间禁用输入，防止并发轮次错乱
         log.write(f"[b green]你：[/]{text}")
-        self._stream_reply_worker(text)
+        self._stream_reply_worker(text, log)
 
     @work(thread=True, exclusive=False)
-    def _stream_reply_worker(self, prompt: str) -> None:
-        log = self.query_one("#chatlog", RichLog)
+    def _stream_reply_worker(self, prompt: str, log: RichLog) -> None:
+        # 注意：worker 跑在后台线程，DOM 访问（query_one 等）必须经
+        # call_from_thread 回到主线程执行，这里直接持有主线程传来的引用
         self.call_from_thread(log.write, "[b yellow]AI：[/]")
         got = False
-        for piece in self.service.stream_reply(prompt):
+        try:
+            for piece in self.service.stream_reply(prompt):
+                got = True
+                self.call_from_thread(log.write, piece)
+        except Exception as e:                 # 双保险：任何异常都变成界面反馈
             got = True
-            self.call_from_thread(log.write, piece)
+            self.call_from_thread(log.write, f"[b red][出错][/]{e}")
         if not got:
             self.call_from_thread(log.write, "[dim]（无内容返回）[/]")
         self.call_from_thread(log.write, "\n")
-        self.call_from_thread(self._refresh_status)
-        self.call_from_thread(self.query_one("#prompt", Input).focus)
+        self.call_from_thread(self._finish_turn)
+
+    def _finish_turn(self) -> None:
+        """一轮对话结束（主线程）：恢复输入框并刷新状态栏。"""
+        prompt_input = self.query_one("#prompt", Input)
+        prompt_input.disabled = False
+        prompt_input.focus()
+        self._refresh_status()
 
     # ---------- 动作 ----------
     def action_clear_chat(self) -> None:

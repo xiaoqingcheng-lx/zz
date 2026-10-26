@@ -55,6 +55,20 @@ def _chat(messages: list) -> dict:
     return data["choices"][0]["message"]
 
 
+def _sanitize_message(msg: dict) -> dict:
+    """只保留回传 LLM 需要的字段。
+
+    模型原始返回里可能带 reasoning_content 等附加字段，
+    原样发回有可能触发 400 参数错误，这里做一次净化。
+    """
+    clean = {"role": msg.get("role", "assistant")}
+    if msg.get("content") is not None:
+        clean["content"] = msg["content"]
+    if msg.get("tool_calls"):
+        clean["tool_calls"] = msg["tool_calls"]
+    return clean
+
+
 def run_agent(prompt: str, history: list = (), verbose: bool = True) -> tuple[str, list]:
     """跑一次完整的 Agent 推理。
 
@@ -66,11 +80,15 @@ def run_agent(prompt: str, history: list = (), verbose: bool = True) -> tuple[st
     messages.append({"role": "user", "content": prompt})
 
     for _round in range(1, MAX_ROUNDS + 1):
-        msg = _chat(messages)
+        try:
+            msg = _chat(messages)
+        except Exception as e:               # 网络/超时/API 错误：给用户明确反馈
+            answer = f"[出错] 请求失败：{e}"
+            return answer, list(history)
 
         # ---- 情形一：LLM 决定调用工具 ----
         if msg.get("tool_calls"):
-            messages.append(msg)         # 先记录助手的 tool_calls 决策
+            messages.append(_sanitize_message(msg))   # 先记录助手的决策
             for tc in msg["tool_calls"]:
                 name = tc["function"]["name"]
                 args = json.loads(tc["function"]["arguments"] or "{}")
