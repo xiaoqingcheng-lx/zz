@@ -33,6 +33,28 @@ DEFAULT_SKILLS_DIR = (
 # 单个文件读取上限（防止异常大的文件撑爆上下文）
 MAX_FILE_CHARS = 30000
 
+# Frontmatter 只可能出现在文件开头；读到这里还没闭合就当没有（防止无闭合标记的
+# 超长正文被整读进来，保证「初始化阶段不读取 Skill 完整正文」）
+MAX_FRONTMATTER_LINES = 200
+
+
+def read_frontmatter_head(path: Path) -> str:
+    """只读取文件开头的 Frontmatter 块，**不读取正文**（对应实验要求 1）。
+
+    从首行 ``---`` 开始逐行读，遇到闭合的 ``---`` 即停；
+    一直没闭合则最多读 MAX_FRONTMATTER_LINES 行（parse_frontmatter 会判为缺字段）。
+    """
+    lines: list[str] = []
+    with path.open("r", encoding="utf-8-sig", errors="replace") as f:
+        for _ in range(MAX_FRONTMATTER_LINES):
+            line = f.readline()
+            if not line:
+                break
+            lines.append(line)
+            if len(lines) > 1 and line.strip() == "---":
+                break
+    return "".join(lines)
+
 
 # --------------------------------------------------------------------------- #
 # YAML Frontmatter 解析（只支持 name/description 这类简单标量 + 块标量 | >）
@@ -181,7 +203,7 @@ class SkillRegistry:
                 self.skipped.append((sub.name, f"缺少 {SKILL_FILE}"))
                 continue
             try:
-                head = skill_file.read_text(encoding="utf-8", errors="replace")
+                head = read_frontmatter_head(skill_file)   # 只读 Frontmatter 头部，不读正文
             except OSError as e:
                 self.skipped.append((sub.name, f"读取失败：{e}"))
                 continue

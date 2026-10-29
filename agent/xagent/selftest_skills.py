@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from load_skill_tool import execute_tool          # noqa: E402
-from skills import SkillRegistry, parse_frontmatter  # noqa: E402
+from skills import SkillRegistry, parse_frontmatter, read_frontmatter_head  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -58,6 +58,15 @@ def test_real_registry() -> None:
     check("只注入 name+description（不含正文）",
           all(s.name in prompt for s in reg.skills.values())
           and "Frontmatter" not in prompt.split("Use the `loadSkill`")[0][:2000])
+
+    notice = reg.get("撰写通知")
+    if notice:
+        head = read_frontmatter_head(notice.skill_file)
+        full = notice.skill_file.read_text(encoding="utf-8", errors="replace")
+        body_marker = "标题必须加入部门名称"          # 只出现在正文里的标记
+        check("初始化只读 Frontmatter 头（不读正文）",
+              body_marker not in head and body_marker in full,
+              f"头部 {len(head)} 字符 / 全文 {len(full)} 字符")
 
     if "撰写通知" not in reg.names():
         print("\n⚠️ 未找到「撰写通知」技能，跳过后续用例")
