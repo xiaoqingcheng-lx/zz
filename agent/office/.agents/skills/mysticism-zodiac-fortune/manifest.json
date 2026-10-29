@@ -1,0 +1,40 @@
+{
+  "type": "skillhub-expert-package",
+  "slug": "mysticism-zodiac-fortune",
+  "displayName": "生肖星座运势",
+  "summary": "覆盖星座生肖运势从「主驱动每日运势」到「任意日期 / 周月运势 / 行运 / 本命盘」再到「跨体系融合 + 28 星宿合盘」的完整工具集，全部免 API Key。",
+  "skillSlugs": [
+    "daily-astro",
+    "horoscope-daily",
+    "western-sun-signs",
+    "fortune-daily",
+    "aistro",
+    "star-mansion-master"
+  ],
+  "skills": [
+    {
+      "slug": "daily-astro",
+      "namespace": "clawhub_jiajiaoy"
+    },
+    {
+      "slug": "horoscope-daily",
+      "namespace": "clawhub_eamanc-lab"
+    },
+    {
+      "slug": "western-sun-signs",
+      "namespace": "clawhub_mike47512"
+    },
+    {
+      "slug": "fortune-daily",
+      "namespace": "clawhub_vccv2rndrv-cyber"
+    },
+    {
+      "slug": "aistro",
+      "namespace": "clawhub_lban2049"
+    },
+    {
+      "slug": "star-mansion-master",
+      "namespace": "clawhub_luoboask"
+    }
+  ]
+}
