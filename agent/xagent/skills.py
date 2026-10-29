@@ -329,11 +329,14 @@ class SkillRegistry:
 
     # ---------------- 概览 ----------------
     def summary(self) -> str:
-        head = f"技能目录：{self.root}（来源：{self.source}）"
-        detail = f"已注册 {len(self.skills)} 个 Skill"
+        """多行概览：避免长路径 + 跳过列表挤成一行在窄控制台里折断。"""
+        lines = [
+            f"技能目录：{self.root}",
+            f"来源：{self.source}｜已注册 {len(self.skills)} 个 Skill",
+        ]
         if self.skipped:
-            detail += "；跳过 " + "、".join(f"{n}（{r}）" for n, r in self.skipped)
-        return f"{head}｜{detail}"
+            lines.append("跳过：" + "、".join(f"{n}（{r}）" for n, r in self.skipped))
+        return "\n".join(lines)
 
 
 def _one_line(text: str) -> str:
