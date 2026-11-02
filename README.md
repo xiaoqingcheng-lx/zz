@@ -61,6 +61,39 @@ python -m venv .venv
 架构图见 `agent/practice02/chat-stream-tool-fileops-architecture.mmd`，
 可粘贴到 [mermaid.live](https://mermaid.live) 查看，同目录也附了渲染好的 PNG。
 
+## agent/xagent：接入 MCP 服务器
+
+xAgent 通过 `agent/xagent/.mcp.json` 接入远程 MCP Server，把它们的工具动态注册进
+Function Calling，和本地工具（`RunCli` / `loadSkill` / `createSkill` / `fileOps` / `officeCli`）用法完全一致。
+
+```json
+{
+  "mcpServers": {
+    "PeiHospitalMCP": { "type": "streamable_http", "url": "http://127.0.0.1:8090/mcp" },
+    "Bazi-MCP": {
+      "type": "streamable_http",
+      "url": "https://mcp.api-inference.modelscope.net/4a3222faa31a4e/mcp"
+    }
+  }
+}
+```
+
+跑之前先把两个服务准备好：
+
+```bat
+pethospitalMCP\启动PeiHospitalMCP.bat   :: 上游 pethospital.exe 需先运行（REST，8080）
+cd agent\xagent
+python main.py --mcp                    :: 看连接结果与注册到的工具
+python main.py                          :: 交互模式，可直接问"医院有多少宠物档案"
+```
+
+要点：
+
+- 只支持 `streamable_http`；某个 Server 连不上只打印失败原因，不影响其它 Server 与本地工具
+- 工具重名（跨服务器或与本地工具）时自动加 `服务器名__工具名` 前缀，内部保留「暴露名 → 服务器 + 原名」映射
+- 回环地址自动绕过系统代理，外部地址走环境代理
+- 自测：`python selftest_mcp.py`（29 项，含 mock 服务器，不依赖真实服务）
+
 ## 说明
 
 - `pethospitalMCP/pet-hospital-mcp-teaching-main/` 是教学用上游项目副本，非本人编写

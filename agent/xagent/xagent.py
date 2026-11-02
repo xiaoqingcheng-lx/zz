@@ -18,6 +18,7 @@
 凭据复用 agent 根目录的 config.ini / _secret.py（经 llm_cli._load_config）。
 """
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -33,6 +34,7 @@ from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as
 from file_ops_tool import TOOL_SCHEMA as FILEOPS_SCHEMA, execute_tool as file_ops_execute  # noqa: E402
 from office_cli_tool import TOOL_SCHEMA as OFFICECLI_SCHEMA, execute_tool as office_cli_execute  # noqa: E402
 from skills import SkillRegistry, _loose_key         # noqa: E402  Skill 发现与注册
+from mcp_client import McpRegistry                   # noqa: E402  MCP 远程工具接入
 
 BASE_URL, _KEY, MODEL = llm_cli._load_config()
 TIMEOUT = 120          # 单次 LLM 请求超时（秒）
@@ -43,9 +45,19 @@ MAX_ROUNDS = 10        # 最多「工具调用→结果回传」轮数，防死�
 # --------------------------------------------------------------------------- #
 SKILLS = SkillRegistry.discover()
 
+# --------------------------------------------------------------------------- #
+# 初始化阶段：连接 MCP Server，动态注册远程工具
+#   配置文件：本文件同目录的 .mcp.json，可用环境变量 XAGENT_MCP_CONFIG 覆盖；
+#   某个 Server 连不上只记录失败原因，不影响本地工具与其它 Server。
+# --------------------------------------------------------------------------- #
+MCP_CONFIG_PATH = Path(os.environ.get("XAGENT_MCP_CONFIG")
+                       or Path(__file__).resolve().parent / ".mcp.json")
+MCP = McpRegistry.from_file(MCP_CONFIG_PATH)
+
 BASE_PROMPT = (
-    "你是 xAgent，一个可以调用本地工具的智能助手。"
-    "你只能调用这五个工具：RunCli、loadSkill、createSkill、fileOps、officeCli。"
+    "你是 xAgent，一个可以调用工具与技能的智能助手。"
+    "可用工具分两类：本地工具（RunCli、loadSkill、createSkill、fileOps、officeCli），"
+    "以及 MCP 服务器提供的远程工具（清单见下文）。两类工具用法完全相同。"
     "注意：技能（Skill）本身不是工具，技能名不能当工具名调用；"
     "想使用某个技能时，必须调用 loadSkill 工具，把技能名填进 name 参数。"
     "需要了解本机信息或执行操作时，主动使用 RunCli 工具获取真实数据，"
@@ -59,24 +71,29 @@ BASE_PROMPT = (
     "涉及 Word、Excel、PPT 文档的任何操作，第一个动作固定是 loadSkill({'name': 'officecli'})，"
     "读到使用说明后再调用 officeCli 工具执行命令；不要跳过这一步直接调 officeCli，"
     "也不要安装或依赖 Office。"
+    "用户问到宠物医院的档案、病历、收费、经营统计等信息时，直接调用对应的 MCP 远程工具查询，"
+    "不要用 RunCli 去 curl 接口，也不要编造数据；工具返回错误时如实说明，不要重复同样的调用。"
     "回答使用简体中文，简洁清晰。"
 )
 
 
 def system_prompt() -> str:
-    """实时拼装 System Prompt（含技能清单）。
+    """实时拼装 System Prompt（含技能清单与 MCP 工具清单）。
 
     每次请求都重新渲染，这样刚用 createSkill 建好的技能能立刻出现在清单里。
     """
     section = SKILLS.prompt_section()
-    return BASE_PROMPT + ("\n\n" + section if section else "")
+    prompt = BASE_PROMPT + ("\n\n" + section if section else "")
+    mcp_section = MCP.prompt_section()
+    return prompt + mcp_section if mcp_section else prompt
 
 
 # 兼容旧接口：模块导入时的快照（交互提示等场景可用）
 SYSTEM_PROMPT = system_prompt()
 
-# 本轮可用的全部工具声明：RunCli + loadSkill + createSkill + fileOps + officeCli
-TOOL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA, OFFICECLI_SCHEMA]
+# 本轮可用的全部工具声明：本地工具 + MCP 远程工具（动态注册）
+LOCAL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA, OFFICECLI_SCHEMA]
+TOOL_SCHEMAS = LOCAL_SCHEMAS + MCP.schemas()
 
 
 def _chat(messages: list) -> dict:
@@ -154,6 +171,8 @@ def dispatch_tool(name: str, arguments: dict) -> str:
             }, ensure_ascii=False)
         # 搜索根：技能目录 + 其上一级（课程要求把 exe 放在 office 目录下）
         return office_cli_execute(arguments, [SKILLS.root, SKILLS.root.parent])
+    if MCP.owns(name):                       # MCP 远程工具：按映射转发给对应服务器
+        return MCP.call(name, arguments)
     # 兜底：模型把技能名当成工具名调用时，自动转成「加载该技能」，避免整轮失败
     skill = SKILLS.get(name)
     if skill is not None:

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "PeiHospitalMCP": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:8090/mcp"
+    },
+    "Bazi-MCP": {
+      "type": "streamable_http",
+      "url": "https://mcp.api-inference.modelscope.net/4a3222faa31a4e/mcp",
+      "timeout": 20
+    }
+  }
+}
