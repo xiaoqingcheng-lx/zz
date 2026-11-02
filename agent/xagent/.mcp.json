@@ -8,6 +8,17 @@
       "type": "streamable_http",
       "url": "https://mcp.api-inference.modelscope.net/a71eb7c849a04d/mcp",
       "timeout": 20
+    },
+    "AnythingLLM": {
+      "type": "stdio",
+      "command": "D:\\大语言模型\\pethospitalMCP\\.venv-mcp\\Scripts\\python.exe",
+      "args": [
+        "D:\\大语言模型\\AnythingLLMMCP\\anythingllm_mcp_server.py"
+      ],
+      "env": {
+        "ANYTHINGLLM_BASE_URL": "http://127.0.0.1:3001/api/v1"
+      },
+      "timeout": 90
     }
   }
 }

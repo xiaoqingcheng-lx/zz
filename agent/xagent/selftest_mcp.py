@@ -164,14 +164,15 @@ reg3 = McpRegistry()
 reg3.load({"mcpServers": {
     "Good": {"type": "streamable_http", "url": url_a},
     "Down": {"type": "streamable_http", "url": "http://127.0.0.1:1/mcp"},
-    "Stdio": {"type": "stdio", "command": "node"},
+    "Unsupported": {"type": "sse", "url": "http://127.0.0.1:1/sse"},
     "NoUrl": {"type": "streamable_http"},
 }})
 check("好服务器照常注册", "Good" in reg3.clients and reg3.tools, str(list(reg3.tools)))
 check("连不上的服务器被记录原因", "Down" in reg3.failures and reg3.failures["Down"].strip() != "",
       reg3.failures.get("Down", "")[:60])
-check("不支持的类型给出明确提示", "stdio" in reg3.failures.get("Stdio", ""),
-      reg3.failures.get("Stdio", ""))
+check("不支持的类型给出明确提示",
+      "不支持" in reg3.failures.get("Unsupported", "") and "sse" in reg3.failures.get("Unsupported", "").lower(),
+      reg3.failures.get("Unsupported", ""))
 check("缺 url 被拒绝", "url" in reg3.failures.get("NoUrl", ""), reg3.failures.get("NoUrl", ""))
 check("一个坏服务器不影响好服务器", len(reg3.tools) == 1, str(list(reg3.tools)))
 
