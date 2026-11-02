@@ -33,6 +33,7 @@ from load_skill_tool import TOOL_SCHEMA as LOADSKILL_SCHEMA, execute_tool as loa
 from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as create_skill_execute  # noqa: E402
 from file_ops_tool import TOOL_SCHEMA as FILEOPS_SCHEMA, execute_tool as file_ops_execute  # noqa: E402
 from office_cli_tool import TOOL_SCHEMA as OFFICECLI_SCHEMA, execute_tool as office_cli_execute  # noqa: E402
+from fetch_web_tool import TOOL_SCHEMA as FETCHWEB_SCHEMA, execute_tool as fetch_web_execute  # noqa: E402
 from skills import SkillRegistry, _loose_key         # noqa: E402  Skill 发现与注册
 from mcp_client import McpRegistry                   # noqa: E402  MCP 远程工具接入
 
@@ -56,7 +57,7 @@ MCP = McpRegistry.from_file(MCP_CONFIG_PATH)
 
 BASE_PROMPT = (
     "你是 xAgent，一个可以调用工具与技能的智能助手。"
-    "可用工具分两类：本地工具（RunCli、loadSkill、createSkill、fileOps、officeCli），"
+    "可用工具分两类：本地工具（RunCli、fetchWeb、loadSkill、createSkill、fileOps、officeCli），"
     "以及 MCP 服务器提供的远程工具（清单见下文）。两类工具用法完全相同。"
     "注意：技能（Skill）本身不是工具，技能名不能当工具名调用；"
     "想使用某个技能时，必须调用 loadSkill 工具，把技能名填进 name 参数。"
@@ -92,7 +93,7 @@ def system_prompt() -> str:
 SYSTEM_PROMPT = system_prompt()
 
 # 本轮可用的全部工具声明：本地工具 + MCP 远程工具（动态注册）
-LOCAL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA, OFFICECLI_SCHEMA]
+LOCAL_SCHEMAS = [RUNCLI_SCHEMA, FETCHWEB_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA, OFFICECLI_SCHEMA]
 TOOL_SCHEMAS = LOCAL_SCHEMAS + MCP.schemas()
 
 
@@ -160,6 +161,8 @@ def dispatch_tool(name: str, arguments: dict) -> str:
         except (ValueError, AttributeError):
             pass
         return raw
+    if name == "fetchWeb":
+        return fetch_web_execute(arguments)
     if name == "fileOps":
         return file_ops_execute(SKILLS.root, arguments)
     if name == "officeCli":
