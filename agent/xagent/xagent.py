@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-"""xAgent —— 能调用本地 CLI 与技能（Skill）的大模型 Agent。
+"""xAgent —— 能调用本地 CLI、读写文件、创建/加载技能（Skill）的大模型 Agent。
 
-两条链路协同工作（Function Calling 完整闭环）：
-    A. 工具调用（RunCli）：LLM 返回 tool_calls → 本地执行 → role=tool 回传 → 继续推理；
+工具链路（Function Calling 完整闭环）：
+    A. 执行命令（RunCli）：LLM 返回 tool_calls → 本地执行 → role=tool 回传 → 继续推理；
     B. 技能加载（loadSkill，Agent Skills 规范）：
        1. **初始化**：以工作目录为项目根，扫描 ``.agents/skills/``，
           只解析每个 SKILL.md 的 name/description（不读正文）；
        2. **注入**：把技能清单渲染进 System Prompt，告诉 LLM 有哪些技能可用；
        3. **按需加载**：LLM 认为需要时调用 loadSkill，正文此时才进入上下文，
           技能引用的附加文件可用 filename 参数二次加载。
-    5. 循环直到出现最终回答，或达到 MAX_ROUNDS 上限（防止死循环）。
+    C. 技能创建（createSkill）：按自然语言要求在 ``.agents/skills/`` 下建英文子目录
+       并写 SKILL.md（校验 Frontmatter、拒绝覆盖），创建后自动热加载；
+    D. 文件操作（fileOps）：在技能目录内建 references/、scripts/ 等目录或写辅助文件。
+    循环直到出现最终回答，或达到 MAX_ROUNDS 上限（防止死循环）。
 
 凭据复用 agent 根目录的 config.ini / _secret.py（经 llm_cli._load_config）。
 """
@@ -25,11 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import llm_cli                                        # noqa: E402  复用凭据加载
 from run_cli_tool import TOOL_SCHEMA as RUNCLI_SCHEMA, execute_tool as run_cli_execute  # noqa: E402
 from load_skill_tool import TOOL_SCHEMA as LOADSKILL_SCHEMA, execute_tool as load_skill_execute  # noqa: E402
+from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as create_skill_execute  # noqa: E402
+from file_ops_tool import TOOL_SCHEMA as FILEOPS_SCHEMA, execute_tool as file_ops_execute  # noqa: E402
 from skills import SkillRegistry                       # noqa: E402  Skill 发现与注册
 
 BASE_URL, _KEY, MODEL = llm_cli._load_config()
 TIMEOUT = 120          # 单次 LLM 请求超时（秒）
-MAX_ROUNDS = 6         # 最多「工具调用→结果回传」轮数，防死循环
+MAX_ROUNDS = 10        # 最多「工具调用→结果回传」轮数，防死循环（createSkill+fileOps 需多轮）
 
 # --------------------------------------------------------------------------- #
 # 初始化阶段：技能发现与注册（只读 name/description，不读正文）
@@ -43,14 +48,27 @@ BASE_PROMPT = (
     "下面列出的技能（Skill）是工作规范：当用户请求属于某个技能的适用范围时，"
     "必须先调用 loadSkill 工具（参数 name 填技能名）加载它的完整说明，再严格按说明执行；"
     "技能中引用的附加资料，可用 loadSkill 的 filename 参数按需读取。"
+    "当用户要求新建一个技能时，调用 createSkill 工具（name 用英文小写加连字符，"
+    "skillContext 写完整的 SKILL.md：Frontmatter 含 name、description，后接正文规则）；"
+    "如果新技能还需要 references/、scripts/ 等目录或辅助文件，创建成功后继续调用 fileOps 工具完成。"
     "回答使用简体中文，简洁清晰。"
 )
 
-# 技能清单（name + description）注入 System Prompt
-SYSTEM_PROMPT = BASE_PROMPT + ("\n\n" + SKILLS.prompt_section() if SKILLS.skills else "")
 
-# 本轮可用的全部工具声明：RunCli + loadSkill
-TOOL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA]
+def system_prompt() -> str:
+    """实时拼装 System Prompt（含技能清单）。
+
+    每次请求都重新渲染，这样刚用 createSkill 建好的技能能立刻出现在清单里。
+    """
+    section = SKILLS.prompt_section()
+    return BASE_PROMPT + ("\n\n" + section if section else "")
+
+
+# 兼容旧接口：模块导入时的快照（交互提示等场景可用）
+SYSTEM_PROMPT = system_prompt()
+
+# 本轮可用的全部工具声明：RunCli + loadSkill + createSkill + fileOps
+TOOL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA]
 
 
 def _chat(messages: list) -> dict:
@@ -94,6 +112,10 @@ def dispatch_tool(name: str, arguments: dict) -> str:
         return run_cli_execute(name, arguments)
     if name == "loadSkill":
         return load_skill_execute(SKILLS, arguments)
+    if name == "createSkill":
+        return create_skill_execute(SKILLS, arguments)
+    if name == "fileOps":
+        return file_ops_execute(SKILLS.root, arguments)
     return json.dumps({"error": f"未知工具：{name}"}, ensure_ascii=False)
 
 
@@ -103,11 +125,12 @@ def run_agent(prompt: str, history: list = (), verbose: bool = True) -> tuple[st
     返回 (最终回答, 更新后的 history)。verbose=True 时在控制台
     打印每一步「LLM 决策 → 本地执行 → 结果回传」，便于观察全过程。
     """
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": system_prompt()}]
     messages += list(history)
     messages.append({"role": "user", "content": prompt})
 
     for _round in range(1, MAX_ROUNDS + 1):
+        messages[0]["content"] = system_prompt()   # 技能清单可能在上一轮被 createSkill 改变
         try:
             msg = _chat(messages)
         except Exception as e:               # 网络/超时/API 错误：给用户明确反馈
