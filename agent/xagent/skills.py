@@ -252,6 +252,12 @@ class SkillRegistry:
         for s in self.skills.values():              # 兼容用目录名调用
             if s.slug.lower() == key:
                 return s
+        # 兼容驼峰/下划线/空格写法：miniEncryption、mini_encryption → mini-encryption
+        loose = _loose_key(key)
+        if loose:
+            for s in self.skills.values():
+                if loose in (_loose_key(s.name), _loose_key(s.slug)):
+                    return s
         return None
 
     def names(self) -> list[str]:
@@ -354,6 +360,11 @@ class SkillRegistry:
 def _one_line(text: str) -> str:
     """把多行 description 压成单行，用于 Prompt 列表。"""
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _loose_key(name: str) -> str:
+    """宽松匹配键：忽略大小写与 - _ 空格，让 miniEncryption 也能命中 mini-encryption。"""
+    return re.sub(r"[-_\s]+", "", (name or "").strip().lower())
 
 
 def _is_ignored_dir(path: Path) -> bool:

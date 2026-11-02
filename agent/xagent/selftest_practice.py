@@ -79,7 +79,32 @@ check("包含「先 help 再动手」规则", "help" in office_text, "")
 check("包含改完复核（view text / validate）",
       ("view <文件> text" in office_text or "view" in office_text) and "validate" in office_text, "")
 
-section("③ 环境：exe 与说明文档就位")
+section("③ 兼容性与兜底（模型写错名称/忘记加载说明时也能走通）")
+check("get('miniEncryption') 能命中 mini-encryption", reg.get("miniEncryption") is not None,
+      getattr(reg.get("miniEncryption"), "name", ""))
+check("get('mini_encryption') 能命中", reg.get("mini_encryption") is not None, "")
+check("loadSkill('miniEncryption') 可用", "content" in json.loads(
+    load_skill(reg, {"name": "miniEncryption"})), "")
+check("get('OfficeCLI') 能命中 officecli", reg.get("OfficeCLI") is not None, "")
+
+import xagent as xa  # noqa: E402
+
+xa._LOADED_SKILLS.clear()
+r = json.loads(xa.dispatch_tool("mini-encryption", {"text": "123"}))
+check("把技能名当工具调用时自动加载", r.get("skill") == "mini-encryption" and "content" in r,
+      r.get("note", "")[:40])
+check("自动加载后标记为已读", xa._loose_key("mini-encryption") in xa._LOADED_SKILLS, "")
+
+xa._LOADED_SKILLS.clear()
+r = json.loads(xa.dispatch_tool("officeCli", {"args": ["--version"]}))
+check("未加载 officecli 说明时拒绝执行", "error" in r and "loadSkill" in r.get("hint", ""),
+      r.get("error", "")[:30])
+
+xa.dispatch_tool("loadSkill", {"name": "officecli"})
+r = json.loads(xa.dispatch_tool("officeCli", {"args": ["--version"]}))
+check("加载说明后 officeCli 放行", r.get("exit_code") == 0, (r.get("stdout") or "").strip()[:20])
+
+section("④ 环境：exe 与说明文档就位")
 office_dir = Path(r"D:\大语言模型\agent\office")
 check("office 目录下有 officecli-win-x64.exe", (office_dir / "officecli-win-x64.exe").is_file(), "")
 check("office 目录下有 OfficeCli操作说明.md", (office_dir / "OfficeCli操作说明.md").is_file(), "")

@@ -32,7 +32,7 @@ from load_skill_tool import TOOL_SCHEMA as LOADSKILL_SCHEMA, execute_tool as loa
 from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as create_skill_execute  # noqa: E402
 from file_ops_tool import TOOL_SCHEMA as FILEOPS_SCHEMA, execute_tool as file_ops_execute  # noqa: E402
 from office_cli_tool import TOOL_SCHEMA as OFFICECLI_SCHEMA, execute_tool as office_cli_execute  # noqa: E402
-from skills import SkillRegistry                       # noqa: E402  Skill 发现与注册
+from skills import SkillRegistry, _loose_key         # noqa: E402  Skill 发现与注册
 
 BASE_URL, _KEY, MODEL = llm_cli._load_config()
 TIMEOUT = 120          # 单次 LLM 请求超时（秒）
@@ -114,19 +114,56 @@ def _sanitize_message(msg: dict) -> dict:
     return clean
 
 
+# 本次会话已加载过正文的技能（宽松键），用于「没加载说明就动手」的兜底拦截
+_LOADED_SKILLS: set[str] = set()
+
+
+def _mark_loaded(name: str) -> None:
+    if name:
+        _LOADED_SKILLS.add(_loose_key(name))
+
+
 def dispatch_tool(name: str, arguments: dict) -> str:
     """工具分发：按工具名路由到具体实现（新增工具只改这里）。"""
     if name == "RunCli":
         return run_cli_execute(name, arguments)
     if name == "loadSkill":
-        return load_skill_execute(SKILLS, arguments)
+        raw = load_skill_execute(SKILLS, arguments)
+        try:
+            _mark_loaded(json.loads(raw).get("skill", ""))
+        except (ValueError, AttributeError):
+            pass
+        return raw
     if name == "createSkill":
-        return create_skill_execute(SKILLS, arguments)
+        raw = create_skill_execute(SKILLS, arguments)
+        try:
+            payload = json.loads(raw)
+            if payload.get("ok"):
+                _mark_loaded(payload.get("skill", ""))
+        except (ValueError, AttributeError):
+            pass
+        return raw
     if name == "fileOps":
         return file_ops_execute(SKILLS.root, arguments)
     if name == "officeCli":
+        # 兜底：没读过 officecli 说明就操作文档，很容易踩坑，先让它加载
+        if SKILLS.get("officecli") and _loose_key("officecli") not in _LOADED_SKILLS:
+            return json.dumps({
+                "error": "尚未加载 officecli 技能说明，已拒绝执行",
+                "hint": "先调用 loadSkill({'name': 'officecli'}) 读取使用规则，再调用本工具",
+            }, ensure_ascii=False)
         # 搜索根：技能目录 + 其上一级（课程要求把 exe 放在 office 目录下）
         return office_cli_execute(arguments, [SKILLS.root, SKILLS.root.parent])
+    # 兜底：模型把技能名当成工具名调用时，自动转成「加载该技能」，避免整轮失败
+    skill = SKILLS.get(name)
+    if skill is not None:
+        payload = json.loads(load_skill_execute(SKILLS, {"name": skill.name}))
+        _mark_loaded(skill.name)
+        payload["note"] = (
+            f"「{skill.name}」是技能（Skill）而不是工具，本次已自动加载它的说明；"
+            "请按说明执行，后续请用 loadSkill 工具调用技能。"
+        )
+        return json.dumps(payload, ensure_ascii=False)
     return json.dumps({"error": f"未知工具：{name}"}, ensure_ascii=False)
 
 
