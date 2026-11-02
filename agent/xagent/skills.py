@@ -25,6 +25,13 @@ from typing import Iterable
 SKILL_FILE = "SKILL.md"
 REQUIRED_FIELDS = ("name", "description")
 
+# 已知的非技能目录（工具自解压/更新产生的临时目录），扫描时静默跳过：
+# OfficeCli 运行时会生成形如 OfficeCli_#SULP#_26sc1d 的目录，里面只有 .update 文件
+IGNORED_DIR_PATTERNS = (
+    re.compile(r"^OfficeCli_#SULP#_\w+$", re.IGNORECASE),
+    re.compile(r"^~\$", re.IGNORECASE),          # Office 打开文件生成的临时目录
+)
+
 # 课程环境默认位置：xagent 与 office 是兄弟目录，技能放在 office 下
 DEFAULT_SKILLS_DIR = (
     Path(__file__).resolve().parent.parent / "office" / ".agents" / "skills"
@@ -198,6 +205,8 @@ class SkillRegistry:
         if not self.root.is_dir():
             return
         for sub in sorted(p for p in self.root.iterdir() if p.is_dir()):
+            if _is_ignored_dir(sub):
+                continue                                  # 工具临时目录：静默跳过，不计入跳过列表
             skill_file = self._find_skill_file(sub)
             if skill_file is None:
                 self.skipped.append((sub.name, f"缺少 {SKILL_FILE}"))
@@ -227,9 +236,12 @@ class SkillRegistry:
     @staticmethod
     def _find_skill_file(directory: Path) -> Path | None:
         """大小写不敏感地找 SKILL.md（兼容 skill.md 写法）。"""
-        for f in directory.iterdir():
-            if f.is_file() and f.name.lower() == SKILL_FILE.lower():
-                return f
+        try:
+            for f in directory.iterdir():
+                if f.is_file() and f.name.lower() == SKILL_FILE.lower():
+                    return f
+        except OSError:
+            return None
         return None
 
     # ---------------- 查询 ----------------
@@ -342,6 +354,21 @@ class SkillRegistry:
 def _one_line(text: str) -> str:
     """把多行 description 压成单行，用于 Prompt 列表。"""
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _is_ignored_dir(path: Path) -> bool:
+    """判断是否为不该参与技能扫描的目录（隐藏目录、工具自解压目录等）。"""
+    name = path.name
+    if name.startswith("."):
+        return True
+    if any(p.match(name) for p in IGNORED_DIR_PATTERNS):
+        return True
+    try:                                   # 含 *.update 的目录 = 工具更新暂存区
+        if any(f.is_file() and f.suffix == ".update" for f in path.iterdir()):
+            return True
+    except OSError:
+        return False
+    return False
 
 
 def _is_inside(path: Path, directory: Path) -> bool:

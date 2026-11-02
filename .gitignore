@@ -29,6 +29,10 @@ node_modules/
 # 打包中间产物
 build/
 
+# 工具自解压 / 更新暂存目录（officecli 运行时生成）
+OfficeCli_#SULP#_*/
+*.update
+
 # 其他
 .git/
 Thumbs.db
