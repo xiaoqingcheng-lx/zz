@@ -11,7 +11,8 @@
           技能引用的附加文件可用 filename 参数二次加载。
     C. 技能创建（createSkill）：按自然语言要求在 ``.agents/skills/`` 下建英文子目录
        并写 SKILL.md（校验 Frontmatter、拒绝覆盖），创建后自动热加载；
-    D. 文件操作（fileOps）：在技能目录内建 references/、scripts/ 等目录或写辅助文件。
+    D. 文件操作（fileOps）：在技能目录内建 references/、scripts/ 等目录或写辅助文件；
+    E. 文档处理（officeCli）：调用 officecli 读写 .docx/.xlsx/.pptx，可执行文件自动定位。
     循环直到出现最终回答，或达到 MAX_ROUNDS 上限（防止死循环）。
 
 凭据复用 agent 根目录的 config.ini / _secret.py（经 llm_cli._load_config）。
@@ -30,6 +31,7 @@ from run_cli_tool import TOOL_SCHEMA as RUNCLI_SCHEMA, execute_tool as run_cli_e
 from load_skill_tool import TOOL_SCHEMA as LOADSKILL_SCHEMA, execute_tool as load_skill_execute  # noqa: E402
 from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as create_skill_execute  # noqa: E402
 from file_ops_tool import TOOL_SCHEMA as FILEOPS_SCHEMA, execute_tool as file_ops_execute  # noqa: E402
+from office_cli_tool import TOOL_SCHEMA as OFFICECLI_SCHEMA, execute_tool as office_cli_execute  # noqa: E402
 from skills import SkillRegistry                       # noqa: E402  Skill 发现与注册
 
 BASE_URL, _KEY, MODEL = llm_cli._load_config()
@@ -51,6 +53,8 @@ BASE_PROMPT = (
     "当用户要求新建一个技能时，调用 createSkill 工具（name 用英文小写加连字符，"
     "skillContext 写完整的 SKILL.md：Frontmatter 含 name、description，后接正文规则）；"
     "如果新技能还需要 references/、scripts/ 等目录或辅助文件，创建成功后继续调用 fileOps 工具完成。"
+    "处理 Word、Excel、PPT 文件时，先用 loadSkill 加载 office-cli 技能，再用 officeCli 工具执行命令，"
+    "不要安装或依赖 Office。"
     "回答使用简体中文，简洁清晰。"
 )
 
@@ -67,8 +71,8 @@ def system_prompt() -> str:
 # 兼容旧接口：模块导入时的快照（交互提示等场景可用）
 SYSTEM_PROMPT = system_prompt()
 
-# 本轮可用的全部工具声明：RunCli + loadSkill + createSkill + fileOps
-TOOL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA]
+# 本轮可用的全部工具声明：RunCli + loadSkill + createSkill + fileOps + officeCli
+TOOL_SCHEMAS = [RUNCLI_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA, OFFICECLI_SCHEMA]
 
 
 def _chat(messages: list) -> dict:
@@ -116,6 +120,8 @@ def dispatch_tool(name: str, arguments: dict) -> str:
         return create_skill_execute(SKILLS, arguments)
     if name == "fileOps":
         return file_ops_execute(SKILLS.root, arguments)
+    if name == "officeCli":
+        return office_cli_execute(arguments, [SKILLS.root])
     return json.dumps({"error": f"未知工具：{name}"}, ensure_ascii=False)
 
 
