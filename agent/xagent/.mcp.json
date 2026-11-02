@@ -6,7 +6,7 @@
     },
     "Bazi-MCP": {
       "type": "streamable_http",
-      "url": "https://mcp.api-inference.modelscope.net/4a3222faa31a4e/mcp",
+      "url": "https://mcp.api-inference.modelscope.net/a71eb7c849a04d/mcp",
       "timeout": 20
     }
   }
