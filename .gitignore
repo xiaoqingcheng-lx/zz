@@ -2,6 +2,7 @@
 AnythingLLMMCP/git/
 AnythingLLMMCP/node/
 AnythingLLMServer/Git/
+AnythingLLMServer/anthingllmserver/
 pethospitalMCP/_venvtest/
 .venv/
 **/.venv/
