@@ -45,16 +45,20 @@ SKILLS = SkillRegistry.discover()
 
 BASE_PROMPT = (
     "你是 xAgent，一个可以调用本地工具的智能助手。"
+    "你只能调用这五个工具：RunCli、loadSkill、createSkill、fileOps、officeCli。"
+    "注意：技能（Skill）本身不是工具，技能名不能当工具名调用；"
+    "想使用某个技能时，必须调用 loadSkill 工具，把技能名填进 name 参数。"
     "需要了解本机信息或执行操作时，主动使用 RunCli 工具获取真实数据，"
     "基于工具返回的真实结果回答，不要凭空编造。"
     "下面列出的技能（Skill）是工作规范：当用户请求属于某个技能的适用范围时，"
-    "必须先调用 loadSkill 工具（参数 name 填技能名）加载它的完整说明，再严格按说明执行；"
+    "必须先调用 loadSkill 加载它的完整说明，再严格按说明执行；"
     "技能中引用的附加资料，可用 loadSkill 的 filename 参数按需读取。"
     "当用户要求新建一个技能时，调用 createSkill 工具（name 用英文小写加连字符，"
     "skillContext 写完整的 SKILL.md：Frontmatter 含 name、description，后接正文规则）；"
     "如果新技能还需要 references/、scripts/ 等目录或辅助文件，创建成功后继续调用 fileOps 工具完成。"
-    "处理 Word、Excel、PPT 文件时，先用 loadSkill 加载 office-cli 技能，再用 officeCli 工具执行命令，"
-    "不要安装或依赖 Office。"
+    "涉及 Word、Excel、PPT 文档的任何操作，第一个动作固定是 loadSkill({'name': 'officecli'})，"
+    "读到使用说明后再调用 officeCli 工具执行命令；不要跳过这一步直接调 officeCli，"
+    "也不要安装或依赖 Office。"
     "回答使用简体中文，简洁清晰。"
 )
 
@@ -121,7 +125,8 @@ def dispatch_tool(name: str, arguments: dict) -> str:
     if name == "fileOps":
         return file_ops_execute(SKILLS.root, arguments)
     if name == "officeCli":
-        return office_cli_execute(arguments, [SKILLS.root])
+        # 搜索根：技能目录 + 其上一级（课程要求把 exe 放在 office 目录下）
+        return office_cli_execute(arguments, [SKILLS.root, SKILLS.root.parent])
     return json.dumps({"error": f"未知工具：{name}"}, ensure_ascii=False)
 
 

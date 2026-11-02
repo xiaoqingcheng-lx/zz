@@ -117,9 +117,9 @@ def main() -> None:
 
     section("⑤ 技能已注册且可加载")
     reg = SkillRegistry.discover()
-    check("office-cli 出现在注册表", "office-cli" in reg.names(), str(reg.names()))
+    check("officecli 出现在注册表", "officecli" in reg.names(), str(reg.names()))
     from load_skill_tool import execute_tool as load_skill
-    r = json.loads(load_skill(reg, {"name": "office-cli"}))
+    r = json.loads(load_skill(reg, {"name": "officecli"}))
     check("SKILL.md 可加载", "officeCli" in r.get("content", ""), r.get("file", ""))
 
     print("\n" + "=" * 52)

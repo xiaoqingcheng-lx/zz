@@ -37,3 +37,7 @@ OfficeCli_#SULP#_*/
 .git/
 Thumbs.db
 Desktop.ini
+
+# OfficeCLI 可执行文件（体积大，按需从 4S 平台下载）
+agent/office/officecli-win-x64.exe
+agent/office/*.old
