@@ -559,10 +559,19 @@ class ContextManager:
     """单个会话的上下文状态：用量、告警、归档、压缩。"""
 
     def __init__(self, project_root: Path, model: str,
-                 window: int | None = None, archive_dir: Path | None = None) -> None:
+                 window: int | None = None, archive_dir: Path | None = None,
+                 warn_ratio: float = WARN_RATIO,
+                 summary_target: int = SUMMARY_TARGET,
+                 default_window: int = DEFAULT_WINDOW) -> None:
         self.project_root = Path(project_root).resolve()
         self.model = model or ""
+        self.warn_ratio = float(warn_ratio)          # 告警阈值（config.ini 可调）
+        self.summary_target = int(summary_target)    # 摘要目标长度（config.ini 可调）
+        # 窗口解析：显式参数 > 环境变量/模型表（resolve_window 内部处理）；
+        # 模型不认识时回落「默认窗口」，并保持 default 标记（界面上标注）。
         self.window, self.window_is_default = resolve_window(model, window)
+        if window is None and self.window_is_default and default_window:
+            self.window = int(default_window)
         self.archive_dir = Path(archive_dir).resolve() if archive_dir else default_archive_dir(self.project_root)
         self.api_tokens = 0                    # 最近一次 API 返回的真实 prompt_tokens
         self.api_source = ""                   # "api" / "estimate"
@@ -601,8 +610,8 @@ class ContextManager:
         return used / self.window if self.window else 0.0
 
     def update_blocked(self, used: int) -> bool:
-        """达到 70% 就挂起输入闸门，返回是否已阻断。"""
-        self.blocked = self.ratio(used) >= WARN_RATIO
+        """达到告警阈值就挂起输入闸门，返回是否已阻断。"""
+        self.blocked = self.ratio(used) >= self.warn_ratio
         return self.blocked
 
     # ---------------- 状态栏 ----------------
@@ -615,9 +624,9 @@ class ContextManager:
         """超过阈值时的一行醒目提示（未超阈值返回空串）。"""
         used = self.used_tokens(messages)
         ratio = self.ratio(used)
-        if ratio < WARN_RATIO:
+        if ratio < self.warn_ratio:
             return ""
-        text = (f"⚠️ 上下文已占用 {ratio * 100:.1f}%（阈值 {WARN_RATIO * 100:.0f}%），"
+        text = (f"⚠️ 上下文已占用 {ratio * 100:.1f}%（阈值 {self.warn_ratio * 100:.0f}%），"
                 f"请执行 /compact 压缩后再继续。")
         return colorize(text, "red", use_color)
 

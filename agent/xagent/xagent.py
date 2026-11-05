@@ -15,11 +15,22 @@
     E. 文档处理（officeCli）：调用 officecli 读写 .docx/.xlsx/.pptx，可执行文件自动定位。
     循环直到出现最终回答，或达到 MAX_ROUNDS 上限（防止死循环）。
 
-凭据复用 agent 根目录的 config.ini / _secret.py（经 llm_cli._load_config）。
+配置与状态（全部来自 config.ini + 内置默认值，见 app_config.py）：
+    · [llm] / [agent] / [context] / [mcp] / [sessions] 五节，缺项自动回落默认值；
+    · 首次运行若无 config.ini，入口会生成带注释的 mock 文件并提示修改后重启。
+
+MCP 异步加载：
+    · 模块导入时只建空注册表，不连接；TUI 先出界面，再在后台线程连接，
+      完成后回调刷新边栏；CLI 用 load_mcp_blocking() 同步加载。
+
+会话与 AGENTS.md（见 session_store.py）：
+    · /new /resume /save 会话存档在 .agents/sessions/；
+    · 新会话若项目根有 AGENTS.md，注入为第一条消息并随会话持久化（一次注入，全程复用）。
 """
 import json
 import os
 import sys
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -27,7 +38,6 @@ _ROOT = Path(__file__).resolve().parent.parent        # agent/ 根目录
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import llm_cli                                        # noqa: E402  复用凭据加载
 from run_cli_tool import TOOL_SCHEMA as RUNCLI_SCHEMA, execute_tool as run_cli_execute  # noqa: E402
 from load_skill_tool import TOOL_SCHEMA as LOADSKILL_SCHEMA, execute_tool as load_skill_execute  # noqa: E402
 from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as create_skill_execute  # noqa: E402
@@ -38,10 +48,19 @@ from recall_tool import TOOL_SCHEMA as RECALL_SCHEMA, execute_tool as recall_exe
 from context_manager import ContextManager           # noqa: E402  上下文计量 / 归档 / 压缩
 from skills import SkillRegistry, _loose_key         # noqa: E402  Skill 发现与注册
 from mcp_client import McpRegistry                   # noqa: E402  MCP 远程工具接入
+import app_config                                    # noqa: E402  config.ini 统一配置
+import session_store                                 # noqa: E402  会话持久化 / AGENTS.md
 
-BASE_URL, _KEY, MODEL = llm_cli._load_config()
-TIMEOUT = 120          # 单次 LLM 请求超时（秒）
-MAX_ROUNDS = 10        # 最多「工具调用→结果回传」轮数，防死循环（createSkill+fileOps 需多轮）
+# --------------------------------------------------------------------------- #
+# 配置：config.ini（cwd → agent 根 → xagent 目录）+ 内置默认值兜底。
+# 入口（main.py / tui_app.py）在导入本模块前会先 ensure_config()：
+# 一份配置都没有时自动生成 mock 文件并提示用户修改后重启。
+# --------------------------------------------------------------------------- #
+CFG = app_config.load(Path.cwd())
+CONFIG_PATH = CFG.config_path
+BASE_URL, _KEY, MODEL = CFG.base_url, CFG.api_key, CFG.model
+TIMEOUT = CFG.timeout          # 单次 LLM 请求超时（秒）
+MAX_ROUNDS = CFG.max_rounds    # 最多「工具调用→结果回传」轮数，防死循环
 
 # --------------------------------------------------------------------------- #
 # 初始化阶段：技能发现与注册（只读 name/description，不读正文）
@@ -49,19 +68,74 @@ MAX_ROUNDS = 10        # 最多「工具调用→结果回传」轮数，防死�
 SKILLS = SkillRegistry.discover()
 
 # --------------------------------------------------------------------------- #
-# 初始化阶段：连接 MCP Server，动态注册远程工具
+# 初始化阶段：MCP 远程工具（异步加载）
+#   这里只创建空注册表，不连接 —— TUI 先进界面，MCP 在后台线程连接，
+#   加载完成后通过 load_mcp_async 的回调刷新界面；
+#   CLI 模式在启动时调 load_mcp_blocking() 同步加载。
 #   配置文件：本文件同目录的 .mcp.json，可用环境变量 XAGENT_MCP_CONFIG 覆盖；
 #   某个 Server 连不上只记录失败原因，不影响本地工具与其它 Server。
 # --------------------------------------------------------------------------- #
 MCP_CONFIG_PATH = Path(os.environ.get("XAGENT_MCP_CONFIG")
                        or Path(__file__).resolve().parent / ".mcp.json")
-MCP = McpRegistry.from_file(MCP_CONFIG_PATH)
+MCP = McpRegistry(MCP_CONFIG_PATH,
+                  connect_timeout=CFG.mcp_connect_timeout,
+                  call_timeout=CFG.mcp_call_timeout)
+
+
+def load_mcp_blocking() -> None:
+    """同步连接全部 MCP 服务器并刷新工具清单（CLI / --tools 等场景用）。"""
+    MCP.load_file(MCP_CONFIG_PATH)
+    _refresh_tool_schemas()
+
+
+def load_mcp_async(on_done=None) -> threading.Thread:
+    """后台线程连接 MCP（TUI 先进入界面，加载完成后回调 on_done(registry)）。"""
+    def _worker() -> None:
+        try:
+            MCP.load_file(MCP_CONFIG_PATH)
+        except Exception as e:                   # 极端错误也要让界面知道加载结束了
+            MCP.failures["<加载>"] = str(e)
+            MCP.loaded = True
+        finally:
+            _refresh_tool_schemas()
+            if on_done is not None:
+                try:
+                    on_done(MCP)
+                except Exception:
+                    pass
+    t = threading.Thread(target=_worker, daemon=True, name="mcp-loader")
+    t.start()
+    return t
+
 
 # --------------------------------------------------------------------------- #
-# 初始化阶段：上下文管理（Token 计量、70% 告警闸门、归档、压缩、状态栏）
+# 初始化阶段：上下文管理（Token 计量、阈值告警闸门、归档、压缩、状态栏）
 #   归档目录：<项目根>/.agents/context/，可用 XAGENT_CONTEXT_DIR 覆盖
+#   阈值 / 默认窗口：config.ini [context] 节
 # --------------------------------------------------------------------------- #
-CONTEXT = ContextManager(project_root=SKILLS.project_root, model=MODEL)
+CONTEXT = ContextManager(project_root=SKILLS.project_root, model=MODEL,
+                         warn_ratio=CFG.warn_ratio,
+                         default_window=CFG.default_window)
+
+# 会话存档目录（相对项目根）：config.ini [sessions] dir
+SESSIONS_SUB = CFG.sessions_dir
+
+
+def sessions_root(project_root: Path | None = None) -> Path:
+    """会话存档目录（/save /resume /new 用）。"""
+    return session_store.sessions_dir(project_root or SKILLS.project_root, SESSIONS_SUB)
+
+
+def new_session(project_root: Path | None = None) -> tuple[list, dict | None]:
+    """新建会话历史：项目根有 AGENTS.md 就注入为第一条 user 消息。
+
+    「一次注入，全程复用」：注入消息随 history 持久化到会话文件，
+    后续轮次直接复用历史里的这一条，不再重复注入；每轮请求中它的
+    内容与位置完全一致，前缀稳定，利于服务端 KV 缓存命中。
+    返回 (历史, 注入事件)，事件由调用方在首次保存会话时写入事件日志。
+    """
+    return session_store.inject_agents_md(
+        [], project_root or SKILLS.project_root)
 
 BASE_PROMPT = (
     "你是 xAgent，一个可以调用工具与技能的智能助手。"
@@ -106,7 +180,23 @@ SYSTEM_PROMPT = system_prompt()
 # 本轮可用的全部工具声明：本地工具 + MCP 远程工具（动态注册）
 LOCAL_SCHEMAS = [RUNCLI_SCHEMA, FETCHWEB_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA,
                  FILEOPS_SCHEMA, OFFICECLI_SCHEMA, RECALL_SCHEMA]
-TOOL_SCHEMAS = LOCAL_SCHEMAS + MCP.schemas()
+
+
+def tool_schemas() -> list[dict]:
+    """实时工具清单：本地工具 + 已连接的 MCP 远程工具。
+
+    MCP 是异步加载的，加载前后清单会变化，所以每次请求现取，
+    不再依赖模块导入时的快照。
+    """
+    return LOCAL_SCHEMAS + MCP.schemas()
+
+
+def _refresh_tool_schemas() -> None:
+    """MCP 加载完成后刷新兼容旧接口的模块级快照。"""
+    globals()["TOOL_SCHEMAS"] = tool_schemas()
+
+
+TOOL_SCHEMAS = list(LOCAL_SCHEMAS)               # 兼容旧引用；MCP 加载后被 _refresh 覆盖
 
 
 def _chat(messages: list, tools: list | None = None, max_tokens: int | None = None) -> tuple[dict, dict]:
@@ -117,7 +207,7 @@ def _chat(messages: list, tools: list | None = None, max_tokens: int | None = No
     body = {
         "model": MODEL,
         "messages": messages,
-        "tools": TOOL_SCHEMAS if tools is None else tools,   # 工具声明
+        "tools": tool_schemas() if tools is None else tools,   # 工具声明（实时取）
         "tool_choice": "auto" if (tools is None or tools) else "none",
     }
     if max_tokens:
@@ -291,12 +381,12 @@ def run_agent(prompt: str, history: list = (), verbose: bool = True,
 #   压缩期间只允许「纯文本 LLM 调用」——tools=[] + tool_choice=none，
 #   从协议层就杜绝了压缩过程中再触发 Function Calling。
 # --------------------------------------------------------------------------- #
-def summarize_chat(system: str, user: str, max_tokens: int = 6000) -> str:
+def summarize_chat(system: str, user: str, max_tokens: int | None = None) -> str:
     """给 context_manager 用的摘要调用：不带任何工具，只返回文本。"""
     msg, usage = _chat(
         [{"role": "system", "content": system},
          {"role": "user", "content": user}],
-        tools=[], max_tokens=max_tokens,
+        tools=[], max_tokens=max_tokens or CFG.summary_tokens,
     )
     CONTEXT.note_usage(usage)                # 摘要调用本身也消耗 Token，记账
     return msg.get("content") or ""

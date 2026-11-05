@@ -9,29 +9,48 @@
     python main.py --tools             # 列出本轮可用的全部工具（本地 + MCP）
     python main.py --context           # 只看上下文用量与归档情况
 
-交互命令：
+交互命令（输入 / 可列出全部命令）：
+    /new       新建会话（自动保存当前会话历史）
+    /resume    列出历史会话，输入编号恢复
+    /save      保存当前会话
+    /quit      保存并退出
     /compact   手动触发上下文压缩（归档原始记录 → LLM 生成摘要 → 替换历史）
+    /history   查看当前会话完整历史
+    /model     查看当前模型与上下文窗口
+    /config    查看配置文件位置与关键参数
     /context   查看上下文用量、阈值与归档文件
     /help      帮助
-    /exit      退出
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
 
-import context_manager as cm                                  # noqa: E402
-from xagent import (CONTEXT, MCP, SKILLS, TOOL_SCHEMAS,       # noqa: E402
-                    compact_session, run_agent, system_prompt)
+# ---- 配置自举：必须在导入 xagent 之前保证 config.ini 存在 ----
+import app_config                                          # noqa: E402
+_CONFIG_PATH, _CONFIG_CREATED = app_config.ensure_config(_HERE.parent)
+if _CONFIG_CREATED:
+    print("=" * 60)
+    print(app_config.MOCK_NOTICE.format(path=_CONFIG_PATH))
+    print("=" * 60)
+    try:
+        input("按回车键退出，修改 config.ini 后重新启动即可。")
+    except (EOFError, KeyboardInterrupt):
+        pass
+    sys.exit(0)
+
+import context_manager as cm                               # noqa: E402
+import session_store as store                              # noqa: E402
+import commands as slash                                   # noqa: E402
+import xagent as xa                                       # noqa: E402
+from xagent import (CONTEXT, MCP, SKILLS, TOOL_SCHEMAS,    # noqa: E402
+                    compact_session, load_mcp_blocking, new_session,
+                    run_agent, system_prompt, tool_schemas)
 
 USE_COLOR = cm.enable_ansi()
 
-HELP_TEXT = """可用命令：
-  /compact   压缩当前会话上下文：先把原始记录完整归档，再让 LLM 生成摘要替换历史
-  /context   查看上下文用量、阈值状态与归档文件列表
-  /logs      查看最近几次压缩记录（压缩了哪些内容、摘要结构、归档编号）
-  /help      显示本帮助
-  /exit      退出（也可以输入 exit / quit / q）"""
+HELP_TEXT = slash.help_text()
 
 
 def _all_messages(history: list) -> list:
@@ -60,7 +79,7 @@ def show_context_detail(history: list) -> None:
           + ("（默认值，未能识别模型）" if CONTEXT.window_is_default else ""))
     print(f"当前占用        {cm.format_k(used)} Tokens / {ratio * 100:.1f}%"
           f"（来源：{'API usage' if CONTEXT.api_source == 'api' else '字符估算'}）")
-    print(f"告警阈值        {cm.WARN_RATIO * 100:.0f}%"
+    print(f"告警阈值        {CONTEXT.warn_ratio * 100:.0f}%"
           + ("　→ 已触发，需 /compact" if CONTEXT.blocked else "　→ 未触发"))
     print(f"消息条数        {len(history)}（不含 System Prompt）")
     print(f"归档目录        {CONTEXT.archive_dir}")
@@ -148,33 +167,130 @@ def show_mcp() -> None:
 
 def show_tools() -> None:
     """列出本轮全部工具声明（本地 + MCP）。"""
-    print(f"共 {len(TOOL_SCHEMAS)} 个工具：")
-    for s in TOOL_SCHEMAS:
+    schemas = tool_schemas()
+    print(f"共 {len(schemas)} 个工具：")
+    for s in schemas:
         fn = s["function"]
         desc = (fn.get("description") or "").replace("\n", " ")[:60]
         print(f"  - {fn['name']:<24} {desc}")
 
 
+def show_model() -> None:
+    print(f"模型            {CONTEXT.model}")
+    print(f"上下文窗口      {cm.format_k(CONTEXT.window)} Tokens"
+          + ("（默认值）" if CONTEXT.window_is_default else ""))
+    print(f"告警阈值        {CONTEXT.warn_ratio * 100:.0f}%")
+    print(f"API 地址        {xa.CFG.base_url}")
+
+
+def show_config() -> None:
+    cfg = xa.CFG
+    print(f"配置文件        {cfg.config_path}"
+          + ("　（示例配置：请修改 api_key 后重启）" if cfg.is_mock else ""))
+    print(f"base_url        {cfg.base_url}")
+    print(f"model           {cfg.model}")
+    print(f"timeout         {cfg.timeout}s ｜ max_rounds {cfg.max_rounds} ｜ "
+          f"summary_tokens {cfg.summary_tokens}")
+    print(f"warn_ratio      {cfg.warn_ratio} ｜ default_window {cfg.default_window}")
+    print(f"sessions_dir    {cfg.sessions_dir} ｜ autosave {'开' if cfg.autosave else '关'}")
+    print(f"MCP 配置        {MCP.config_path} ｜ 已加载 {'是' if MCP.loaded else '否'}")
+
+
+def show_history(history: list) -> None:
+    """查看当前会话完整历史（含注入消息与工具调用轨迹）。"""
+    if not history:
+        print("当前会话还没有历史消息。")
+        return
+    print(f"当前会话历史（{len(history)} 条）：")
+    print(cm.render_history_view(history))
+
+
+# --------------------------------------------------------------------------- #
+# 会话命令（/new /resume /save）
+# --------------------------------------------------------------------------- #
+def save_session(session_id: str, history: list, events: list | None) -> dict:
+    return store.save_session(SKILLS.project_root, history, session_id=session_id,
+                              sub=xa.SESSIONS_SUB,
+                              model=CONTEXT.model, events=events)
+
+
+def cmd_new(session_id: str, history: list, events: list) -> tuple[str, list, list]:
+    """/new：自动保存当前会话，返回 (新会话ID, 新历史, 新事件)。"""
+    if history:
+        meta = save_session(session_id, history, events)
+        print(f"💾 已保存当前会话 {meta['id']}（{meta['turns']} 轮）"
+              f" → {meta.get('path', '')}")
+    new_history, agents_event = new_session()
+    new_events = [agents_event] if agents_event else []
+    new_id = store.new_session_id()
+    CONTEXT.reset_usage()
+    print(f"—— 新会话 {new_id} ——")
+    if agents_event:
+        print("已注入项目根 AGENTS.md（一次注入，全程复用）。")
+    print()
+    return new_id, new_history, new_events
+
+
+def cmd_resume(session_id: str, history: list, events: list) -> tuple[str, list, list]:
+    """/resume：列出历史会话，输入编号恢复。"""
+    sessions = store.list_sessions(SKILLS.project_root,
+                                   xa.SESSIONS_SUB)
+    if not sessions:
+        print("暂无历史会话（.agents/sessions/ 为空）。")
+        return session_id, history, events
+    print("\n历史会话（按更新时间倒序）：")
+    for i, s in enumerate(sessions[:12], 1):
+        print(f"  [{i}] {s['title']}  ·  {s['id']}  ·  "
+              f"{s['turns']} 轮 / {s['messages']} 条  ·  {s['updated_at']}")
+    raw = input("输入编号恢复会话（直接回车取消）：").strip()
+    if not raw.isdigit() or not (1 <= int(raw) <= min(12, len(sessions))):
+        print("已取消。\n")
+        return session_id, history, events
+    picked = sessions[int(raw) - 1]
+    if history:
+        meta = save_session(session_id, history, events)
+        print(f"💾 已保存当前会话 {meta['id']} → {meta.get('path', '')}")
+    try:
+        new_history, meta = store.load_session(
+            SKILLS.project_root, picked["id"], xa.SESSIONS_SUB)
+    except (OSError, ValueError) as e:
+        print(f"恢复失败：{e}")
+        return session_id, history, events
+    CONTEXT.reset_usage()
+    print(f"—— 已恢复会话 {meta.get('id', picked['id'])} ——\n"
+          f"   标题：{meta.get('title', '')} · {meta.get('turns', 0)} 轮 · "
+          f"{len(new_history)} 条消息\n")
+    return meta.get("id", picked["id"]), new_history, []
+
+
 def demo(prompt: str) -> None:
     """一次性演示：完整展示 Agent 调用工具的全过程。"""
+    load_mcp_blocking()
     print(f"用户：{prompt}")
-    answer, history = run_agent(prompt, ctx=CONTEXT)
+    history, _ = new_session()
+    answer, history = run_agent(prompt, history, ctx=CONTEXT)
     print(f"\nxAgent：{answer}")
     print()
     show_status(history)
 
 
 def interactive() -> None:
-    print("xAgent（可调用本地工具、技能与 MCP 远程工具；/help 看命令，exit 退出）")
+    load_mcp_blocking()
+    history, agents_event = new_session()
+    events: list[dict] = [agents_event] if agents_event else []
+    session_id = store.new_session_id()
+
+    print("xAgent（可调用本地工具、技能与 MCP 远程工具；输入 / 看命令，/help 帮助）")
     print(SKILLS.summary())
     print(MCP.summary())
+    if events:
+        print("已注入项目根 AGENTS.md（一次注入，全程复用）。")
+    print(f"会话编号：{session_id}（每轮结束自动保存）")
     print(f"上下文归档目录：{CONTEXT.archive_dir}\n")
-
-    history: list = []
     show_status(history)
 
     while True:
-        # ---- 输入闸门：达到 70% 后只接受命令 ----
+        # ---- 输入闸门：达到阈值后只接受命令 ----
         warn = CONTEXT.warning_line(_all_messages(history), USE_COLOR)
         if warn:
             print(warn)
@@ -192,16 +308,43 @@ def interactive() -> None:
 
         # ---- 命令 ----
         if low.startswith("/"):
-            if low == "/compact":
+            if low in ("/help", "/?"):
+                print(HELP_TEXT)
+            elif low in ("/compact", "/compress"):
                 history = do_compact(history)
             elif low in ("/context", "/status"):
                 show_context_detail(history)
             elif low in ("/logs", "/log"):
                 show_logs()
-            elif low in ("/help", "/?"):
-                print(HELP_TEXT)
+            elif low == "/history":
+                show_history(history)
+            elif low == "/new":
+                session_id, history, events = cmd_new(session_id, history, events)
+            elif low in ("/resume", "/sessions"):
+                session_id, history, events = cmd_resume(session_id, history, events)
+            elif low == "/save":
+                if history:
+                    meta = save_session(session_id, history, events)
+                    print(f"💾 会话已保存 {meta['id']}（{meta['turns']} 轮 / "
+                          f"{meta['messages']} 条） → {meta.get('path', '')}\n")
+                else:
+                    print("当前会话为空，没有可保存的内容。")
+            elif low == "/model":
+                show_model()
+            elif low == "/config":
+                show_config()
+            elif low == "/skills":
+                show_skills()
+            elif low == "/mcp":
+                show_mcp()
+            elif low == "/tools":
+                show_tools()
+            elif low == "/clear":
+                history, events = [], []
+                CONTEXT.reset_usage()
+                print("—— 会话已清空 ——\n")
             else:
-                print(f"未知命令：{prompt}（输入 /help 查看可用命令）")
+                print(f"未知命令：{prompt}（输入 / 查看可用命令）")
             show_status(history)
             continue
 
@@ -215,7 +358,15 @@ def interactive() -> None:
         answer, history = run_agent(prompt, history, ctx=CONTEXT)
         print(f"xAgent：{answer}\n")
 
-        # ---- 每次响应后检查上下文用量（含工具消息），越过 70% 就挂闸门 ----
+        # ---- 每轮结束自动保存会话（config.ini [sessions] autosave 可关） ----
+        if xa.CFG.autosave and store.count_turns(history):
+            try:
+                save_session(session_id, history, events)
+                events = []
+            except Exception:
+                pass
+
+        # ---- 每次响应后检查上下文用量（含工具消息），越过阈值就挂闸门 ----
         used = CONTEXT.used_tokens(_all_messages(history))
         CONTEXT.update_blocked(used)
         show_status(history)
@@ -236,10 +387,15 @@ if __name__ == "__main__":
     elif args and args[0] == "--skills":
         show_skills()
     elif args and args[0] == "--mcp":
+        load_mcp_blocking()
         show_mcp()
     elif args and args[0] == "--tools":
+        load_mcp_blocking()
         show_tools()
     elif args and args[0] == "--context":
         show_context_detail([])
+    elif args and args[0] == "--config":
+        load_mcp_blocking()
+        show_config()
     else:
         interactive()

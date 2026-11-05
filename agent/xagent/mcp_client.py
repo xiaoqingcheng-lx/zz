@@ -80,6 +80,7 @@ class McpClient:
     name: str
     url: str
     timeout: float = CALL_TIMEOUT
+    connect_timeout: float = CONNECT_TIMEOUT
     protocol: str = PROTOCOL_VERSIONS[0]
     session_id: str | None = None
     capabilities: dict = field(default_factory=dict)
@@ -185,11 +186,12 @@ class McpClient:
                     "protocolVersion": version,
                     "capabilities": {},
                     "clientInfo": {"name": "xAgent", "version": "1.0"},
-                }, timeout=CONNECT_TIMEOUT)
+                }, timeout=self.connect_timeout)
                 self.capabilities = (result or {}).get("capabilities", {})
                 self.protocol = (result or {}).get("protocolVersion", version)
                 try:
-                    self._rpc("notifications/initialized", notify=True, timeout=CONNECT_TIMEOUT)
+                    self._rpc("notifications/initialized", notify=True,
+                              timeout=self.connect_timeout)
                 except McpError:
                     pass                      # 无状态服务端可能忽略该通知
                 return (result or {}).get("serverInfo", {})
@@ -202,7 +204,7 @@ class McpClient:
         cursor = None
         for _ in range(MAX_LIST_PAGES):
             params = {"cursor": cursor} if cursor else {}
-            result = self._rpc("tools/list", params, timeout=CONNECT_TIMEOUT) or {}
+            result = self._rpc("tools/list", params, timeout=self.connect_timeout) or {}
             tools.extend(result.get("tools") or [])
             cursor = result.get("nextCursor")
             if not cursor:
@@ -224,10 +226,11 @@ class StdioMcpClient:
 
     def __init__(self, name: str, command: str, args: list | None = None,
                  env: dict | None = None, timeout: float = CALL_TIMEOUT,
-                 cwd: str | None = None):
+                 cwd: str | None = None, connect_timeout: float = CONNECT_TIMEOUT):
         self.name = name
         self.command = command
         self.timeout = timeout
+        self.connect_timeout = connect_timeout
         self.protocol = PROTOCOL_VERSIONS[0]
         self.capabilities: dict = {}
         self._queue: queue.Queue = queue.Queue()
@@ -341,7 +344,7 @@ class StdioMcpClient:
                     "protocolVersion": version,
                     "capabilities": {},
                     "clientInfo": {"name": "xAgent", "version": "1.0"},
-                }, timeout=CONNECT_TIMEOUT)
+                }, timeout=self.connect_timeout)
                 self.capabilities = (result or {}).get("capabilities", {})
                 self.protocol = (result or {}).get("protocolVersion", version)
                 self._rpc("notifications/initialized", notify=True)
@@ -351,7 +354,7 @@ class StdioMcpClient:
         raise McpError(str(last) if last else "initialize 失败")
 
     def list_tools(self) -> list[dict]:
-        result = self._rpc("tools/list", {}, timeout=CONNECT_TIMEOUT) or {}
+        result = self._rpc("tools/list", {}, timeout=self.connect_timeout) or {}
         return result.get("tools") or []
 
     def call_tool(self, tool: str, arguments: dict) -> dict:
@@ -376,28 +379,42 @@ class StdioMcpClient:
 class McpRegistry:
     """所有 MCP Server 的集合：负责加载配置、连接、注册工具、分发调用。"""
 
-    def __init__(self, config_path: Path | None = None):
+    def __init__(self, config_path: Path | None = None,
+                 connect_timeout: float = CONNECT_TIMEOUT,
+                 call_timeout: float = CALL_TIMEOUT):
         self.config_path = config_path
+        self.connect_timeout = connect_timeout
+        self.call_timeout = call_timeout
         self.clients: dict[str, McpClient] = {}
         self.tools: dict[str, McpTool] = {}          # exposed -> McpTool
         self.failures: dict[str, str] = {}           # server -> 失败原因
         self.server_tools: dict[str, int] = {}       # server -> 工具数
+        self.loaded = False                          # 是否已执行过一次加载
 
     # ---------------- 加载与连接 ----------------
     def load(self, config: dict) -> None:
+        """连接全部服务器并注册工具。
+
+        全程先在局部变量里构建（new_clients / new_failures / new_server_tools /
+        new_tools），最后一次性赋值回实例——异步加载时，其它线程正在
+        遍历这些字典也不会遇到「迭代中变更」。
+        """
         servers = (config or {}).get("mcpServers") or config or {}
         if not isinstance(servers, dict):
             raise McpError("配置格式错误：mcpServers 必须是对象")
+        new_failures: dict[str, str] = dict(self.failures)
+        new_clients: dict = dict(self.clients)
+        new_server_tools: dict[str, int] = dict(self.server_tools)
         raw: list[tuple[str, object, list[dict]]] = []
         for name, cfg in servers.items():
             if not isinstance(cfg, dict):
-                self.failures[name] = "配置项不是对象"
+                new_failures[name] = "配置项不是对象"
                 continue
             ctype = (cfg.get("type") or ("stdio" if cfg.get("command") else "streamable_http")).lower()
             if ctype in ("stdio", "child_process", "child-process"):
                 command = cfg.get("command") or ""
                 if not command:
-                    self.failures[name] = "stdio 服务器缺少 command"
+                    new_failures[name] = "stdio 服务器缺少 command"
                     continue
                 try:
                     client = StdioMcpClient(
@@ -405,42 +422,49 @@ class McpRegistry:
                         command=command,
                         args=list(cfg.get("args") or []),
                         env=dict(cfg.get("env") or {}),
-                        timeout=float(cfg.get("timeout") or CALL_TIMEOUT),
+                        timeout=float(cfg.get("timeout") or self.call_timeout),
+                        connect_timeout=float(cfg.get("connect_timeout") or self.connect_timeout),
                     )
                     client.connect()
                     listed = client.list_tools()
                 except McpError as e:
-                    self.failures[name] = str(e)
+                    new_failures[name] = str(e)
                     continue
-                self.clients[name] = client          # type: ignore[assignment]
+                new_clients[name] = client          # type: ignore[assignment]
                 raw.append((name, client, listed))
-                self.server_tools[name] = len(listed)
+                new_server_tools[name] = len(listed)
                 continue
 
             url = cfg.get("url") or ""
             if ctype not in ("streamable_http", "http", "streamable-http", "streamable"):
-                self.failures[name] = f"暂不支持的传输类型 {ctype}（支持 streamable_http / stdio）"
+                new_failures[name] = f"暂不支持的传输类型 {ctype}（支持 streamable_http / stdio）"
                 continue
             if not url:
-                self.failures[name] = "缺少 url"
+                new_failures[name] = "缺少 url"
                 continue
             client = McpClient(name=name, url=url,
-                               timeout=float(cfg.get("timeout") or CALL_TIMEOUT))
+                               timeout=float(cfg.get("timeout") or self.call_timeout),
+                               connect_timeout=float(cfg.get("connect_timeout") or self.connect_timeout))
             try:
                 client.connect()
                 listed = client.list_tools()
             except McpError as e:
-                self.failures[name] = str(e)
+                new_failures[name] = str(e)
                 continue
-            self.clients[name] = client
+            new_clients[name] = client
             raw.append((name, client, listed))
-            self.server_tools[name] = len(listed)
+            new_server_tools[name] = len(listed)
+        self.clients = new_clients
+        self.failures = new_failures
+        self.server_tools = new_server_tools
 
-        # 先统计重名，决定是否加服务器前缀
+        # 先统计重名，决定是否加服务器前缀（本地构建，最后一次性赋值，
+        # 这样异步加载时其它线程遍历 self.tools 不会遇到迭代中变更）
         counts: dict[str, int] = {}
         for _name, _client, listed in raw:
             for t in listed:
                 counts[t.get("name", "")] = counts.get(t.get("name", ""), 0) + 1
+        new_tools: dict[str, McpTool] = {}
         for name, _client, listed in raw:
             for t in listed:
                 tool_name = t.get("name", "")
@@ -448,28 +472,42 @@ class McpRegistry:
                     continue
                 need_prefix = counts.get(tool_name, 0) > 1 or tool_name in RESERVED_NAMES
                 exposed = f"{_slug(name)}__{tool_name}" if need_prefix else tool_name
-                if exposed in self.tools:      # 极端情况：仍然撞名，强制前缀
+                if exposed in new_tools:       # 极端情况：仍然撞名，强制前缀
                     exposed = f"{_slug(name)}__{tool_name}"
-                self.tools[exposed] = McpTool(
+                new_tools[exposed] = McpTool(
                     server=name,
                     name=tool_name,
                     exposed=exposed,
                     description=t.get("description") or "",
                     schema=t.get("inputSchema") or {},
                 )
+        self.tools = new_tools
+        self.loaded = True
+
+    # ---------------- 配置文件加载（可延迟 / 异步调用） ----------------
+    def load_file(self, path: str | Path | None = None) -> "McpRegistry":
+        """从 .mcp.json 读取并连接全部服务器；文件缺失静默返回。"""
+        path = Path(path or self.config_path or "")
+        self.config_path = path
+        if not str(path) or not path.is_file():
+            self.loaded = True
+            return self
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            self.failures["<配置文件>"] = f"读取失败：{e}"
+            self.loaded = True
+            return self
+        self.load(config)
+        return self
 
     @classmethod
-    def from_file(cls, path: str | Path | None = None) -> "McpRegistry":
-        reg = cls(Path(path) if path else None)
-        if path is None or not Path(path).is_file():
-            return reg
-        try:
-            config = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            reg.failures["<配置文件>"] = f"读取失败：{e}"
-            return reg
-        reg.load(config)
-        return reg
+    def from_file(cls, path: str | Path | None = None,
+                  connect_timeout: float = CONNECT_TIMEOUT,
+                  call_timeout: float = CALL_TIMEOUT) -> "McpRegistry":
+        reg = cls(Path(path) if path else None,
+                  connect_timeout=connect_timeout, call_timeout=call_timeout)
+        return reg.load_file(path)
 
     # ---------------- 对外接口 ----------------
     def schemas(self) -> list[dict]:

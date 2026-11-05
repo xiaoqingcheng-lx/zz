@@ -8,6 +8,7 @@
       70% 闸门拒绝新消息、F2 清空会话。
 """
 import asyncio
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -44,10 +45,12 @@ def fake_agent(prompt, history=(), verbose=False, ctx=None, on_event=None):
 
 
 async def main() -> int:
-    # 归档目录指到临时目录，避免污染项目
+    # 归档目录与会话目录都指到临时目录，避免污染项目
     tmp = Path(tempfile.mkdtemp(prefix="xagent_tui_"))
+    import xagent as xa
     from xagent import CONTEXT
     CONTEXT.archive_dir = tmp
+    xa.SKILLS.project_root = tmp          # 会话存档 / AGENTS.md 都落在 tmp
 
     app = XAgentTUI()
     app.run_hook = fake_agent
@@ -184,6 +187,125 @@ async def main() -> int:
         await pilot.pause(0.3)
         check("F2 清空历史", app.history == [], str(app.history))
         check("F2 后状态栏归零", "轮数: 0" in app.status_text, app.status_text)
+
+        # ================================================================
+        # 以下为新功能：命令补全面板 / 会话命令 / AGENTS.md 注入 / 边栏
+        # ================================================================
+        from tui_app import CommandPalette, ResumeScreen
+        pal = app.query_one("#palette", CommandPalette)
+
+        # ---- 补全面板：输入 / 弹出引导 ----
+        inp.value = "/re"
+        await pilot.pause(0.2)
+        check("输入 / 前缀弹出补全面板", pal.visible)
+        check("补全面板过滤出 /resume", "/resume" in pal._current, str(pal._current))
+        await pilot.press("enter")            # 回车补全
+        await pilot.pause(0.2)
+        check("回车补全成完整命令", inp.value == "/resume ", repr(inp.value))
+        check("补全后面板收起", not pal.visible)
+
+        inp.value = "/n"
+        await pilot.pause(0.2)
+        check("/n 弹出且含 /new", pal.visible and "/new" in pal._current)
+        await pilot.press("down")
+        await pilot.press("up")
+        check("↑↓ 移动选中项", (pal.query_one("#palette-list").highlighted or 0) == 0)
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        check("Esc 关闭补全面板", not pal.visible)
+        inp.value = "普通消息不弹面板"
+        await pilot.pause(0.2)
+        check("普通文本不弹补全面板", not pal.visible)
+        inp.value = ""
+
+        # ---- 一轮对话后 /save ----
+        inp.value = "保存我"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause(0.3)
+        inp.value = "/save"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        sessions_dir = tmp / ".agents" / "sessions"
+        saved = list(sessions_dir.glob("*.json"))
+        check("/save 落盘会话文件", len(saved) >= 1, str(list(sessions_dir.glob('*'))))
+        if saved:
+            data = json.loads(saved[0].read_text(encoding="utf-8"))
+            check("会话文件含完整历史与元信息",
+                  len(data["history"]) == 2 and data["turns"] == 1
+                  and "title" in data and "created_at" in data)
+        old_session_id = app.session_id
+
+        # ---- /new：自动保存当前会话 + AGENTS.md 注入 ----
+        (tmp / "AGENTS.md").write_text("# 项目约定\n- 回答用中文", encoding="utf-8")
+        inp.value = "/new"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        check("/new 换了会话编号", app.session_id != old_session_id)
+        check("/new 后历史只含 AGENTS.md 注入消息",
+              len(app.history) == 1
+              and app.history[0]["content"].startswith("【AGENTS.md 项目说明】"),
+              str(app.history)[:120])
+        text = "\n".join(s.text for s in log.lines)
+        check("/new 界面提示自动保存", "已保存当前会话" in text)
+        check("AGENTS.md 不计入轮数", "轮数: 0" in app.status_text, app.status_text)
+        n_files_after_new = len(list(sessions_dir.glob("*.json")))
+        check("旧会话已按编号自动保存",
+              (sessions_dir / f"{old_session_id}.json").is_file())
+
+        # ---- /resume：面板选择恢复 ----
+        inp.value = "/save"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        inp.value = "/resume"
+        await pilot.press("enter")
+        await pilot.pause(0.4)
+        check("/resume 弹出会话面板", isinstance(app.screen, ResumeScreen),
+              type(app.screen).__name__)
+        check("面板列出会话条目",
+              app.screen.query_one("#resume-list").option_count >= 2)
+        await pilot.press("enter")            # 选中最新会话并恢复
+        await pilot.pause(0.4)
+        check("回车后面板关闭", type(app.screen).__name__ != "ResumeScreen",
+              type(app.screen).__name__)
+        check("历史已恢复（含 AGENTS.md 消息）",
+              len(app.history) >= 1
+              and app.history[0]["content"].startswith("【AGENTS.md 项目说明】"),
+              str(app.history)[:120])
+        text = "\n".join(s.text for s in log.lines)
+        check("恢复界面显示会话信息", "已恢复会话" in text)
+
+        # Esc 取消
+        inp.value = "/resume"
+        await pilot.press("enter")
+        await pilot.pause(0.4)
+        await pilot.press("escape")
+        await pilot.pause(0.3)
+        check("Esc 取消会话面板", type(app.screen).__name__ != "ResumeScreen",
+              type(app.screen).__name__)
+
+        # ---- 边栏 ----
+        from xagent import MCP
+        body = app.sidebar_text
+        check("边栏有 MCP 区域", "MCP" in body, body[:120])
+        check("边栏有技能区域", "技能" in body, body[:120])
+        MCP.loaded = True                     # 模拟异步加载完成 → 动态刷新
+        MCP.server_tools.setdefault("SelftestMCP", 2)
+        app._refresh_sidebar()
+        body = app.sidebar_text
+        check("MCP 加载后边栏动态刷新出服务器", "SelftestMCP" in body, body[:200])
+        MCP.server_tools.pop("SelftestMCP", None)
+        app._refresh_sidebar()
+
+        # ---- /history /model /config /mcp /skills 不炸 ----
+        for cmd in ("/history", "/model", "/config", "/mcp", "/skills", "/help"):
+            inp.value = cmd
+            await pilot.press("enter")
+            await pilot.pause(0.2)
+        text = "\n".join(s.text for s in log.lines)
+        check("/model /config /mcp /skills 全部可执行",
+              "模型" in text and "配置文件" in text and "MCP 服务器" in text)
+        check("未知命令有提示", "/nope" not in text)  # 未输入过未知命令，应无副作用
 
     print(f"\n通过 {PASS} 项，失败 {FAIL} 项")
     return 1 if FAIL else 0

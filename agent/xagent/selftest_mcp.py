@@ -199,6 +199,22 @@ check("配置文件不存在时为空表不报错", len(McpRegistry.from_file("Z
 section("⑥ 接入 xAgent：动态工具声明与分发")
 import xagent as xa  # noqa: E402
 
+# MCP 改为异步加载后，导入时注册表是空的；测试里同步加载一次。
+# 真实服务器不在时，注册一个假客户端兜底，保证分发链路可测。
+xa.load_mcp_blocking()
+if not xa.MCP.tools:
+    from mcp_client import McpTool
+
+    class _FakeClient:
+        def call_tool(self, name, arguments):
+            return {"content": [{"type": "text", "text": "pong"}]}
+
+    xa.MCP.clients["Selftest"] = _FakeClient()
+    xa.MCP.tools["fake_ping"] = McpTool(server="Selftest", name="ping",
+                                        exposed="fake_ping", description="t", schema={})
+    xa.MCP.server_tools["Selftest"] = 1
+    xa._refresh_tool_schemas()
+
 names = [s["function"]["name"] for s in xa.TOOL_SCHEMAS]
 check("TOOL_SCHEMAS 含 MCP 工具", len(xa.TOOL_SCHEMAS) == len(xa.LOCAL_SCHEMAS) + len(xa.MCP.tools),
       f"{len(xa.LOCAL_SCHEMAS)} 本地 + {len(xa.MCP.tools)} MCP")
