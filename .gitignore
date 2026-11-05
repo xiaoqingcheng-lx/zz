@@ -46,3 +46,6 @@ agent/office/*.old
 # MCP 服务端虚拟环境与打包元数据
 **/.venv-*/
 *.egg-info/
+
+# 上下文压缩归档（原始对话记录属本地数据，不进仓库）
+.agents/context/

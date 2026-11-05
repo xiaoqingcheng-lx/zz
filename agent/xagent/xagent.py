@@ -34,6 +34,8 @@ from create_skill_tool import TOOL_SCHEMA as CREATESKILL_SCHEMA, execute_tool as
 from file_ops_tool import TOOL_SCHEMA as FILEOPS_SCHEMA, execute_tool as file_ops_execute  # noqa: E402
 from office_cli_tool import TOOL_SCHEMA as OFFICECLI_SCHEMA, execute_tool as office_cli_execute  # noqa: E402
 from fetch_web_tool import TOOL_SCHEMA as FETCHWEB_SCHEMA, execute_tool as fetch_web_execute  # noqa: E402
+from recall_tool import TOOL_SCHEMA as RECALL_SCHEMA, execute_tool as recall_execute  # noqa: E402
+from context_manager import ContextManager           # noqa: E402  上下文计量 / 归档 / 压缩
 from skills import SkillRegistry, _loose_key         # noqa: E402  Skill 发现与注册
 from mcp_client import McpRegistry                   # noqa: E402  MCP 远程工具接入
 
@@ -55,9 +57,15 @@ MCP_CONFIG_PATH = Path(os.environ.get("XAGENT_MCP_CONFIG")
                        or Path(__file__).resolve().parent / ".mcp.json")
 MCP = McpRegistry.from_file(MCP_CONFIG_PATH)
 
+# --------------------------------------------------------------------------- #
+# 初始化阶段：上下文管理（Token 计量、70% 告警闸门、归档、压缩、状态栏）
+#   归档目录：<项目根>/.agents/context/，可用 XAGENT_CONTEXT_DIR 覆盖
+# --------------------------------------------------------------------------- #
+CONTEXT = ContextManager(project_root=SKILLS.project_root, model=MODEL)
+
 BASE_PROMPT = (
     "你是 xAgent，一个可以调用工具与技能的智能助手。"
-    "可用工具分两类：本地工具（RunCli、fetchWeb、loadSkill、createSkill、fileOps、officeCli），"
+    "可用工具分两类：本地工具（RunCli、fetchWeb、loadSkill、createSkill、fileOps、officeCli、recallContext），"
     "以及 MCP 服务器提供的远程工具（清单见下文）。两类工具用法完全相同。"
     "注意：技能（Skill）本身不是工具，技能名不能当工具名调用；"
     "想使用某个技能时，必须调用 loadSkill 工具，把技能名填进 name 参数。"
@@ -74,6 +82,9 @@ BASE_PROMPT = (
     "也不要安装或依赖 Office。"
     "用户问到宠物医院的档案、病历、收费、经营统计等信息时，直接调用对应的 MCP 远程工具查询，"
     "不要用 RunCli 去 curl 接口，也不要编造数据；工具返回错误时如实说明，不要重复同样的调用。"
+    "如果对话开头有【上下文压缩摘要】，说明更早的历史已被归档："
+    "当摘要里缺少你需要的细节（文件路径、报错、工具返回、用户原话等）时，"
+    "调用 recallContext 工具按关键词检索原始记录，不要凭猜测补全，也不要说自己失忆。"
     "回答使用简体中文，简洁清晰。"
 )
 
@@ -93,18 +104,24 @@ def system_prompt() -> str:
 SYSTEM_PROMPT = system_prompt()
 
 # 本轮可用的全部工具声明：本地工具 + MCP 远程工具（动态注册）
-LOCAL_SCHEMAS = [RUNCLI_SCHEMA, FETCHWEB_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA, FILEOPS_SCHEMA, OFFICECLI_SCHEMA]
+LOCAL_SCHEMAS = [RUNCLI_SCHEMA, FETCHWEB_SCHEMA, LOADSKILL_SCHEMA, CREATESKILL_SCHEMA,
+                 FILEOPS_SCHEMA, OFFICECLI_SCHEMA, RECALL_SCHEMA]
 TOOL_SCHEMAS = LOCAL_SCHEMAS + MCP.schemas()
 
 
-def _chat(messages: list) -> dict:
-    """调用 chat/completions（非流式），返回 choices[0].message。"""
+def _chat(messages: list, tools: list | None = None, max_tokens: int | None = None) -> tuple[dict, dict]:
+    """调用 chat/completions（非流式），返回 (choices[0].message, usage)。
+
+    tools=None 走默认全量工具；传 [] 表示纯文本调用（压缩摘要用，杜绝 Function Calling）。
+    """
     body = {
         "model": MODEL,
         "messages": messages,
-        "tools": TOOL_SCHEMAS,           # 把 RunCli / loadSkill 声明给 LLM
-        "tool_choice": "auto",           # 由 LLM 自行决定是否调用
+        "tools": TOOL_SCHEMAS if tools is None else tools,   # 工具声明
+        "tool_choice": "auto" if (tools is None or tools) else "none",
     }
+    if max_tokens:
+        body["max_tokens"] = max_tokens
     req = urllib.request.Request(
         BASE_URL.rstrip("/") + "/chat/completions",
         data=json.dumps(body).encode(),
@@ -115,7 +132,7 @@ def _chat(messages: list) -> dict:
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    return data["choices"][0]["message"]
+    return data["choices"][0]["message"], (data.get("usage") or {})
 
 
 def _sanitize_message(msg: dict) -> dict:
@@ -163,6 +180,8 @@ def dispatch_tool(name: str, arguments: dict) -> str:
         return raw
     if name == "fetchWeb":
         return fetch_web_execute(arguments)
+    if name == "recallContext":              # 检索压缩归档的原始上下文
+        return recall_execute(arguments, CONTEXT.archive_dir)
     if name == "fileOps":
         return file_ops_execute(SKILLS.root, arguments)
     if name == "officeCli":
@@ -189,30 +208,50 @@ def dispatch_tool(name: str, arguments: dict) -> str:
     return json.dumps({"error": f"未知工具：{name}"}, ensure_ascii=False)
 
 
-def run_agent(prompt: str, history: list = (), verbose: bool = True) -> tuple[str, list]:
+BLOCKED_HINT = ("上下文已占用 {pct}（阈值 70%），已暂停接受新的提示词。"
+                "请先执行 /compact 压缩上下文，成功后再继续。")
+
+
+def run_agent(prompt: str, history: list = (), verbose: bool = True,
+              ctx: ContextManager | None = None) -> tuple[str, list]:
     """跑一次完整的 Agent 推理。
 
     返回 (最终回答, 更新后的 history)。verbose=True 时在控制台
     打印每一步「LLM 决策 → 本地执行 → 结果回传」，便于观察全过程。
+
+    history 现在保留完整对话轨迹（含 assistant 的 tool_calls 与 role=tool 结果），
+    这样工具调用消息也计入上下文、也能被 /compact 归档，符合课程要求。
     """
+    ctx = ctx or CONTEXT
+
+    # ---- 闸门：达到 70% 且尚未压缩，拒绝继续处理普通提示词 ----
+    if ctx.blocked:
+        used = ctx.used_tokens([{"role": "system", "content": system_prompt()}] + list(history))
+        return BLOCKED_HINT.format(pct=f"{ctx.ratio(used) * 100:.1f}%"), list(history)
+
     messages = [{"role": "system", "content": system_prompt()}]
     messages += list(history)
     messages.append({"role": "user", "content": prompt})
+    base = list(history)                     # 本轮开始前的历史，出错时原样返回
 
     for _round in range(1, MAX_ROUNDS + 1):
         messages[0]["content"] = system_prompt()   # 技能清单可能在上一轮被 createSkill 改变
         try:
-            msg = _chat(messages)
+            msg, usage = _chat(messages)
         except Exception as e:               # 网络/超时/API 错误：给用户明确反馈
             answer = f"[出错] 请求失败：{e}"
-            return answer, list(history)
+            return answer, base
+        ctx.note_usage(usage)                # 优先记录 API 返回的真实 Token 用量
 
         # ---- 情形一：LLM 决定调用工具 ----
         if msg.get("tool_calls"):
             messages.append(_sanitize_message(msg))   # 先记录助手的决策
             for tc in msg["tool_calls"]:
                 name = tc["function"]["name"]
-                args = json.loads(tc["function"]["arguments"] or "{}")
+                try:
+                    args = json.loads(tc["function"]["arguments"] or "{}")
+                except ValueError:
+                    args = {}
                 if verbose:
                     print(f"  🔧 Agent 决定调用工具：{name}({args})")
 
@@ -230,10 +269,30 @@ def run_agent(prompt: str, history: list = (), verbose: bool = True) -> tuple[st
 
         # ---- 情形二：LLM 给出最终回答 ----
         answer = msg.get("content") or ""
-        history = list(history) + [
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": answer},
-        ]
-        return answer, history
+        messages.append({"role": "assistant", "content": answer})
+        return answer, messages[1:]      # 丢掉 system，保留完整轨迹（含工具消息）
 
-    return "（达到最大工具调用轮数上限，已停止）", list(history)
+    return "（达到最大工具调用轮数上限，已停止）", base
+
+
+# --------------------------------------------------------------------------- #
+# 上下文压缩：/compact 的执行入口
+#   压缩期间只允许「纯文本 LLM 调用」——tools=[] + tool_choice=none，
+#   从协议层就杜绝了压缩过程中再触发 Function Calling。
+# --------------------------------------------------------------------------- #
+def summarize_chat(system: str, user: str, max_tokens: int = 6000) -> str:
+    """给 context_manager 用的摘要调用：不带任何工具，只返回文本。"""
+    msg, usage = _chat(
+        [{"role": "system", "content": system},
+         {"role": "user", "content": user}],
+        tools=[], max_tokens=max_tokens,
+    )
+    CONTEXT.note_usage(usage)                # 摘要调用本身也消耗 Token，记账
+    return msg.get("content") or ""
+
+
+def compact_session(history: list, ctx: ContextManager | None = None,
+                    verbose: bool = True, printer=print) -> tuple[list, dict]:
+    """执行一次完整压缩：归档 → 摘要 → 替换历史。失败抛 CompactError。"""
+    ctx = ctx or CONTEXT
+    return ctx.compact(history, summarize_chat, verbose=verbose, printer=printer)

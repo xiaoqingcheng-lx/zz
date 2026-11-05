@@ -36,7 +36,7 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05", "2026-07-28")
 MAX_LIST_PAGES = 20
 
 # 本地已有工具名，MCP 工具撞上就加前缀
-RESERVED_NAMES = {"RunCli", "fetchWeb", "loadSkill", "createSkill", "fileOps", "officeCli"}
+RESERVED_NAMES = {"RunCli", "fetchWeb", "loadSkill", "createSkill", "fileOps", "officeCli", "recallContext"}
 
 
 def _slug(text: str) -> str:
