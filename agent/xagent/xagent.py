@@ -213,11 +213,16 @@ BLOCKED_HINT = ("上下文已占用 {pct}（阈值 70%），已暂停接受新�
 
 
 def run_agent(prompt: str, history: list = (), verbose: bool = True,
-              ctx: ContextManager | None = None) -> tuple[str, list]:
+              ctx: ContextManager | None = None,
+              on_event=None) -> tuple[str, list]:
     """跑一次完整的 Agent 推理。
 
     返回 (最终回答, 更新后的 history)。verbose=True 时在控制台
     打印每一步「LLM 决策 → 本地执行 → 结果回传」，便于观察全过程。
+
+    on_event: 可选回调，供 TUI 等界面实时展示过程，收到
+      {"type": "tool_call", "name": ..., "args": ...}
+      {"type": "tool_result", "name": ..., "result": ..., "is_error": bool}
 
     history 现在保留完整对话轨迹（含 assistant 的 tool_calls 与 role=tool 结果），
     这样工具调用消息也计入上下文、也能被 /compact 归档，符合课程要求。
@@ -254,11 +259,17 @@ def run_agent(prompt: str, history: list = (), verbose: bool = True,
                     args = {}
                 if verbose:
                     print(f"  🔧 Agent 决定调用工具：{name}({args})")
+                if on_event:
+                    on_event({"type": "tool_call", "name": name, "args": args})
 
                 result = dispatch_tool(name, args)          # 本地执行
                 if verbose:
                     preview = result if len(result) <= 200 else result[:200] + "…"
                     print(f"  📤 执行结果回传：{preview}")
+                if on_event:
+                    on_event({"type": "tool_result", "name": name, "result": result,
+                              "is_error": result.startswith('{"error"') or '"isError": true' in result
+                              or result.startswith("[错误]") or result.startswith("[出错]")})
 
                 messages.append({        # 结果以 role=tool 回传给 LLM
                     "role": "tool",

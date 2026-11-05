@@ -2,6 +2,7 @@
 """xAgent 入口：默认终端交互对话，--demo 一次性演示，--skills 看技能，--mcp 看 MCP。
 
     python main.py                     # 交互模式（输入 /help 看命令，exit 退出）
+    python main.py --tui               # 启动 Textual 全屏界面（同 tui_app.py）
     python main.py --demo "提示词"     # 单次运行，完整打印工具调用过程
     python main.py --skills            # 打印技能注册表与注入的 System Prompt 片段
     python main.py --mcp               # 打印 MCP 服务器连接结果与注册到的工具
@@ -201,9 +202,17 @@ def interactive() -> None:
         show_status(history)
 
 
+def run_tui() -> None:
+    """启动 Textual 全屏界面（同一套内核，界面换成带状态栏的 TUI）。"""
+    from tui_app import XAgentTUI
+    XAgentTUI().run()
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if args and args[0] == "--demo":
+    if args and args[0] == "--tui":
+        run_tui()
+    elif args and args[0] == "--demo":
         demo(args[1] if len(args) > 1 else "查看当前目录下有哪些文件")
     elif args and args[0] == "--skills":
         show_skills()

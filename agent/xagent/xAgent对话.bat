@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
-title xAgent
+title xAgent TUI
 cd /d "%~dp0"
-py main.py
+py tui_app.py
 echo.
 pause
