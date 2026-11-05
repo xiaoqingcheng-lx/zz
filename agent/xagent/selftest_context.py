@@ -261,6 +261,66 @@ try:
 except Exception as e:                                  # noqa: BLE001
     check("xAgent 集成可用", False, f"{type(e).__name__}: {e}")
 
+print("\n⑪ 压缩日志：记清楚压了什么")
+hist_log = [
+    {"role": "user", "content": "把 main.py 的日志改成 logging 模块，别再用 print"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [{"id": "c1", "type": "function",
+                     "function": {"name": "RunCli", "arguments": '{"command":"ls"}'}}]},
+    {"role": "tool", "tool_call_id": "c1", "content": "main.py\ncontext_manager.py"},
+    {"role": "assistant", "content": "已改成 logging。"},
+    {"role": "user", "content": "再补一个 recallContext 工具的说明"},
+    {"role": "assistant", "content": "好的，已补。"},
+]
+desc = cm.describe_history(hist_log)
+check("统计总条数", desc["total"] == 6, str(desc["total"]))
+check("角色分布 user=2", desc["roles"]["user"] == 2, str(desc["roles"]))
+check("角色分布 assistant=3", desc["roles"]["assistant"] == 3, str(desc["roles"]))
+check("角色分布 tool=1", desc["roles"]["tool"] == 1, str(desc["roles"]))
+check("提取用户诉求 2 条", len(desc["topics"]) == 2, str(desc["topics"]))
+check("诉求内容被截断压成一行", desc["topics"][0].startswith("把 main.py 的日志改成 logging"), desc["topics"][0])
+check("识别出用过的工具", desc["tools"] == ["RunCli"], str(desc["tools"]))
+check("Token 估计大于 0", desc["tokens"] > 0, str(desc["tokens"]))
+
+outline = cm.summary_outline("# 工作摘要\n\n## 一、用户目标\n正文\n## 二、已完成\n### 细节\n")
+check("摘要目录抽取标题", outline == ["工作摘要", "一、用户目标", "二、已完成", "细节"], str(outline))
+
+ctx_log = ContextManager(project_root=TMP, model="qwen-plus", archive_dir=TMP / "logctx")
+new_hist2, info2 = ctx_log.compact(hist_log, fake_chat, verbose=False, printer=lambda *_: None)
+check("info 里带 before 统计", info2["before"]["total"] == 6, str(info2.get("before")))
+check("info 里带摘要目录", "工作摘要" in info2["outline"], str(info2["outline"]))
+check("info 里带日志路径", info2["log_path"].endswith("compact.log"), info2["log_path"])
+check("日志文件已落盘", Path(info2["log_path"]).is_file())
+
+log_text = Path(info2["log_path"]).read_text(encoding="utf-8")
+check("日志含归档编号", info2["id"] in log_text)
+check("日志含消息条数与角色分布", "6 条" in log_text and "user 2" in log_text, log_text[:200])
+check("日志含用户诉求原文", "把 main.py 的日志改成 logging" in log_text)
+check("日志含涉及工具", "RunCli" in log_text)
+check("日志含摘要结构", "工作摘要" in log_text)
+check("日志含压缩前后 Token", "压缩" in log_text and "→" in log_text)
+
+block_lines = cm.describe_block(info2)
+joined = "\n".join(block_lines)
+check("describe_block 有标题", block_lines[0].startswith("📦"), block_lines[0])
+check("清单含原始消息", "原始消息" in joined)
+check("清单含用户诉求", "用户诉求" in joined)
+check("清单含归档文件", "归档文件" in joined)
+check("清单含压缩日志", "压缩日志" in joined)
+
+# 再压一次，日志应追加而不是覆盖
+new_hist3, info3 = ctx_log.compact(new_hist2 * 2, fake_chat, verbose=False, printer=lambda *_: None)
+log_text2 = Path(info3["log_path"]).read_text(encoding="utf-8")
+check("第二次压缩追加日志（两条记录都在）",
+      log_text2.count("=" * 62) == 2 and info2["id"] in log_text2 and info3["id"] in log_text2,
+      f"分隔线 {log_text2.count('=' * 62)} 条")
+recent = cm.read_compact_log(Path(info3["log_path"]), blocks=1)
+check("read_compact_log 只取最近 1 次", info3["id"] in recent and info2["id"] not in recent, recent[:120])
+
+# 摘要消息不该被当成新诉求
+desc2 = cm.describe_history(new_hist2)
+check("压缩摘要不算用户诉求", desc2["topics"] == [], str(desc2["topics"]))
+
 print()
 print(f"通过 {passed} 项，失败 {failed} 项")
 sys.exit(0 if failed == 0 else 1)

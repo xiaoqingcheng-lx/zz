@@ -33,6 +33,7 @@ HELP = (
     "[b]可用命令[/]\n"
     "  [b cyan]/compact[/]  压缩上下文（先归档原文，再让 LLM 生成摘要替换历史）\n"
     "  [b cyan]/context[/]  查看上下文用量、阈值状态与归档文件\n"
+    "  [b cyan]/logs[/]     查看最近几次压缩记录（压了哪些内容、摘要结构）\n"
     "  [b cyan]/tools[/]    查看当前可调用的全部工具（本地 + MCP）\n"
     "  [b cyan]/help[/]     本帮助\n"
     "  [b cyan]exit[/]      退出（或 ctrl+q）\n"
@@ -163,6 +164,8 @@ class XAgentTUI(App):
                 self._show_context(log)
             elif cmd == "/tools":
                 self._show_tools(log)
+            elif cmd in ("/logs", "/log"):
+                self._show_logs(log)
             elif cmd in ("/help", "/?"):
                 log.write(HELP)
             else:
@@ -276,7 +279,21 @@ class XAgentTUI(App):
                   f"Token 约 {cm.format_k(before)} → 约 {cm.format_k(after)}")
         log.write(f"[dim]   归档编号：{escape(info['id'])}[/]")
         log.write(f"[dim]   归档文件：{escape(str(info['path']))}[/]")
-        log.write("[dim]   摘要末尾已追加归档说明；需要旧细节可让 Agent 调用 recallContext 检索[/]\n")
+        log.write("[dim]   摘要末尾已追加归档说明；需要旧细节可让 Agent 调用 recallContext 检索[/]")
+        # 「本次压缩了什么」明细：条数/角色分布/涉及工具/用户诉求/摘要结构/体积
+        for line in cm.describe_block(info):
+            raw = line.rstrip()
+            indent = " " * (len(raw) - len(raw.lstrip()))
+            body = raw.strip()
+            if body.startswith("📦"):
+                log.write(f"[b]{escape(body)}[/]")
+                continue
+            head, sep, rest = body.partition("  ")
+            if sep and rest.strip() and len(head) <= 10 and not head[:1].isdigit():
+                log.write(f"{indent}[b]{escape(head)}[/]  [dim]{escape(rest.strip())}[/]")
+            else:
+                log.write(f"{indent}[dim]{escape(body)}[/]")
+        log.write("[dim]   输入 /logs 可查看历次压缩记录[/]\n")
         self._finish_turn()
 
     # ------------------------------------------------------------------ #
@@ -302,6 +319,19 @@ class XAgentTUI(App):
             log.write(f"[dim]     … 另有 {len(archives) - 5} 个[/]")
         log.write("")
         self._refresh_status()
+
+    def _show_logs(self, log: RichLog) -> None:
+        """查看最近几次压缩日志：每次压了哪些内容、摘要结构、归档编号。"""
+        log_path = CONTEXT.archive_dir / cm.COMPACT_LOG_NAME
+        text = cm.read_compact_log(log_path, 3)
+        if not text:
+            log.write("[dim]暂无压缩记录，执行一次 /compact 后会生成。[/]")
+            log.write(f"[dim]   日志文件：{escape(str(log_path))}[/]\n")
+            return
+        log.write(f"[b]最近几次压缩记录[/] [dim]（{escape(str(log_path))}）[/]")
+        for line in text.splitlines():
+            log.write(f"[dim]{escape(line)}[/]")
+        log.write("")
 
     def _show_tools(self, log: RichLog) -> None:
         log.write(f"[b]共 {len(LOCAL_SCHEMAS) + len(MCP.tools)} 个工具[/]")

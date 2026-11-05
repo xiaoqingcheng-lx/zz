@@ -34,9 +34,13 @@ estimate_messages_tokens = _mod.estimate_messages_tokens
 format_k = _mod.format_k
 ratio_color = _mod.ratio_color
 resolve_window = _mod.resolve_window
+describe_block = _mod.describe_block        # 「本次压缩了什么」清单
+read_compact_log = _mod.read_compact_log    # 读最近几次压缩日志
+COMPACT_LOG_NAME = _mod.COMPACT_LOG_NAME
 
 __all__ = [
     "ContextManager", "CompactError", "WARN_RATIO", "COMPACT_PROMPT",
     "estimate_text_tokens", "estimate_messages_tokens", "format_k",
     "ratio_color", "resolve_window",
+    "describe_block", "read_compact_log", "COMPACT_LOG_NAME",
 ]

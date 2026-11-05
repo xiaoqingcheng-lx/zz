@@ -339,6 +339,157 @@ def read_archive(path: Path) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# 压缩日志：记录「这一次到底压掉了哪些内容」
+# --------------------------------------------------------------------------- #
+COMPACT_LOG_NAME = "compact.log"
+
+
+def _short(text, limit: int = 70) -> str:
+    """压成一行并截断（用于日志里的诉求/标题，不带长提示语）。"""
+    s = " ".join(str(text or "").replace("\r", " ").replace("\n", " ").split())
+    return s if len(s) <= limit else s[:limit] + "…"
+
+
+def describe_history(messages) -> dict:
+    """统计一批历史消息，回答「压了什么」：条数、角色分布、Token、用户诉求、涉及工具。"""
+    msgs = list(messages or [])
+    roles = {"system": 0, "user": 0, "assistant": 0, "tool": 0, "other": 0}
+    topics: list[str] = []
+    tools: list[str] = []
+    for msg in msgs:
+        role = str(msg.get("role") or "other").lower()
+        roles[role if role in roles else "other"] += 1
+        content = str(msg.get("content") or "")
+        # 压缩摘要本身不算「用户诉求」，否则会把上一次的摘要当成本轮话题
+        if role == "user" and content and not content.startswith(SUMMARY_HEADER[:8]):
+            one = _short(content)
+            if one:
+                topics.append(one)
+        for tc in (msg.get("tool_calls") or []):
+            fn = (tc or {}).get("function") or {}
+            name = str(fn.get("name") or "").strip()
+            if name and name not in tools:
+                tools.append(name)
+    return {
+        "total": len(msgs),
+        "roles": roles,
+        "tokens": estimate_messages_tokens(msgs),
+        "topics": topics,
+        "tools": tools,
+    }
+
+
+def summary_outline(summary: str, limit: int = 12) -> list[str]:
+    """从摘要里抽出 Markdown 标题，作为「摘要保留了哪些块」的目录。"""
+    out: list[str] = []
+    for line in (summary or "").splitlines():
+        s = line.strip()
+        if s.startswith("#"):
+            title = s.lstrip("#").strip()
+            if title:
+                out.append(_short(title, 60))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def describe_block(info: dict, topic_limit: int = 5) -> list[str]:
+    """把压缩信息渲染成「本次压缩了什么」的纯文本清单（命令行与 TUI 共用）。"""
+    before = info.get("before") or {}
+    roles = before.get("roles") or {}
+    lines = ["📦 本次压缩了什么"]
+    lines.append(
+        f"  原始消息  {before.get('total', info.get('replaced', 0))} 条"
+        f"（user {roles.get('user', 0)} / assistant {roles.get('assistant', 0)}"
+        f" / tool {roles.get('tool', 0)}）｜ 约 {format_k(before.get('tokens', 0))} Tokens"
+    )
+    tools = before.get("tools") or []
+    if tools:
+        more = f" 等 {len(tools)} 个" if len(tools) > 6 else ""
+        lines.append(f"  涉及工具  {'、'.join(tools[:6])}{more}")
+
+    topics = before.get("topics") or []
+    if topics:
+        lines.append(f"  用户诉求  （共 {len(topics)} 条，列出前 {min(topic_limit, len(topics))} 条）")
+        for i, t in enumerate(topics[:topic_limit], 1):
+            lines.append(f"            {i}. {t}")
+        if len(topics) > topic_limit:
+            lines.append(f"            … 另有 {len(topics) - topic_limit} 条，见归档原文")
+
+    outline = info.get("outline") or []
+    if outline:
+        lines.append("  摘要结构  " + " ／ ".join(outline[:6])
+                     + (f" 等 {len(outline)} 节" if len(outline) > 6 else ""))
+    elif info.get("summary"):
+        lines.append("  摘要开头  " + _short(info["summary"], 60))
+
+    if info.get("source_chars"):
+        lines.append(
+            f"  原文体积  {info['source_chars']:,} 字符 ≈ "
+            f"{format_k(info.get('source_tokens', 0))} Tokens（送入摘要模型的完整记录）"
+        )
+
+    lines.append(
+        f"  摘要体积  {info.get('chars', 0):,} 字符 ≈ {format_k(info.get('tokens_estimate', 0))} Tokens"
+        f"（{format_k(before.get('tokens', 0))} → {format_k(info.get('tokens_estimate', 0))}）"
+    )
+    lines.append(f"  归档文件  {info.get('path', '')}")
+    if info.get("id"):
+        lines.append(f"  检索方式  recallContext(id=\"{info['id']}\", text=\"关键词\")")
+    if info.get("log_path"):
+        lines.append(f"  压缩日志  {info['log_path']}")
+    if info.get("log_error"):
+        lines.append(f"  ⚠️ 日志写入失败：{info['log_error']}")
+    return lines
+
+
+def append_compact_log(log_path: Path, info: dict) -> Path:
+    """把本次压缩追加写进 compact.log（人可读，一行一条关键信息）。"""
+    path = Path(log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    before = info.get("before") or {}
+    roles = before.get("roles") or {}
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = ["=" * 62]
+    lines.append(f"[{stamp}] 压缩完成 · 编号 {info.get('id', '')} · 会话模型 {info.get('model', '') or '未知'}")
+    lines.append(
+        f"  原始消息：{before.get('total', 0)} 条"
+        f"（user {roles.get('user', 0)} / assistant {roles.get('assistant', 0)}"
+        f" / tool {roles.get('tool', 0)}），约 {format_k(before.get('tokens', 0))} Tokens"
+    )
+    if before.get("tools"):
+        lines.append(f"  涉及工具：{'、'.join(before['tools'])}")
+    for i, t in enumerate((before.get("topics") or [])[:8], 1):
+        lines.append(f"  诉求 {i}：{t}")
+    if info.get("outline"):
+        lines.append(f"  摘要结构：{' ／ '.join(info['outline'])}")
+    elif info.get("summary"):
+        lines.append(f"  摘要开头：{_short(info['summary'], 60)}")
+    if info.get("source_chars"):
+        lines.append(
+            f"  原文体积：{info['source_chars']:,} 字符 ≈ {format_k(info.get('source_tokens', 0))} Tokens"
+        )
+    lines.append(
+        f"  摘要体积：{info.get('chars', 0):,} 字符 ≈ {format_k(info.get('tokens_estimate', 0))} Tokens"
+        f"（压缩 {format_k(before.get('tokens', 0))} → {format_k(info.get('tokens_estimate', 0))}）"
+    )
+    lines.append(f"  归档文件：{info.get('path', '')}")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def read_compact_log(log_path: Path, blocks: int = 3) -> str:
+    """读最近 N 次压缩日志（用于 /logs 查看）。"""
+    path = Path(log_path)
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    parts = [b for b in text.split("=" * 62) if b.strip()]
+    return ("=" * 62).join([""] + parts[-blocks:]).strip() if parts else ""
+
+
+# --------------------------------------------------------------------------- #
 # 上下文管理器
 # --------------------------------------------------------------------------- #
 class ContextManager:
@@ -491,11 +642,22 @@ class ContextManager:
             "id": archive_id,
             "path": str(path),
             "when": when,
+            "model": self.model,
             "summary": summary.strip(),
             "chars": len(content),
             "tokens_estimate": estimate_text_tokens(content),
             "replaced": len(history),
+            "before": describe_history(history),   # 本次到底压了哪些内容
+            "outline": summary_outline(summary),   # 摘要保留了哪几块
+            "source_chars": len(transcript),
+            "source_tokens": estimate_text_tokens(transcript),
+            "log_path": "",
         }
+        try:                                       # 日志写失败不影响压缩本身
+            info["log_path"] = str(append_compact_log(self.archive_dir / COMPACT_LOG_NAME, info))
+        except OSError as e:
+            info["log_error"] = str(e)
+
         self.reset_usage()                                     # 旧读数失效
         self.last_compact = info
         return [{"role": "user", "content": content}], info

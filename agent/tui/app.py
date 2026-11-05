@@ -16,6 +16,9 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, Input, RichLog, Static
 
+from rich.markup import escape
+
+from core import context as cm
 from core.chat import ChatService
 
 
@@ -101,6 +104,8 @@ class ChatTUI(App):
                 self._start_compact(log)
             elif cmd in ("/context", "/status"):
                 self._show_context(log)
+            elif cmd in ("/logs", "/log"):
+                self._show_logs(log)
             elif cmd in ("/help", "/?"):
                 self._show_help(log)
             else:
@@ -143,12 +148,27 @@ class ChatTUI(App):
             self.call_from_thread(
                 log.write,
                 f"[b green]✅ 压缩完成[/]：{info['replaced']} 条消息 → 1 条摘要，"
-                f"归档编号 [b]{info['id']}[/]\n"
-                f"[dim]   归档文件：{info['path']}[/]\n"
-                f"[dim]   摘要约 {info['tokens_estimate']} Tokens；需要旧细节可让 Agent 用 recallContext 检索[/]\n",
+                f"归档编号 [b]{info['id']}[/]",
             )
+            self.call_from_thread(self._write_compact_block, log, info)
         finally:
             self.call_from_thread(self._finish_turn)
+
+    def _write_compact_block(self, log: RichLog, info: dict) -> None:
+        """压缩完成后打印「本次压缩了什么」明细。"""
+        for line in cm.describe_block(info):
+            raw = line.rstrip()
+            indent = " " * (len(raw) - len(raw.lstrip()))
+            body = raw.strip()
+            if body.startswith("📦"):
+                log.write(f"[b]{body}[/]")
+                continue
+            head, sep, rest = body.partition("  ")
+            if sep and rest.strip() and len(head) <= 10 and not head[:1].isdigit():
+                log.write(f"{indent}[b]{head}[/]  [dim]{rest.strip()}[/]")
+            else:
+                log.write(f"{indent}[dim]{body}[/]")
+        log.write("[dim]   需要旧细节可让 Agent 调用 recallContext 检索；输入 /logs 查看历次记录[/]\n")
 
     def _show_context(self, log: RichLog) -> None:
         ctx = self.service.context_status()
@@ -161,11 +181,24 @@ class ChatTUI(App):
         )
         self._refresh_status()
 
+    def _show_logs(self, log: RichLog) -> None:
+        """查看最近几次压缩记录。"""
+        log_path = self.service.ctx.archive_dir / cm.COMPACT_LOG_NAME
+        text = cm.read_compact_log(log_path, 3)
+        if not text:
+            log.write("[dim]暂无压缩记录，执行一次 /compact 后会生成。[/]\n")
+            return
+        log.write(f"[b]最近几次压缩记录[/] [dim]（{escape(str(log_path))}）[/]")
+        for line in text.splitlines():
+            log.write(f"[dim]{escape(line)}[/]")
+        log.write("")
+
     def _show_help(self, log: RichLog) -> None:
         log.write(
             "[b]可用命令[/]\n"
             "  [b cyan]/compact[/]  压缩上下文（先归档原文，再生成摘要替换历史）\n"
             "  [b cyan]/context[/]  查看上下文用量与归档\n"
+            "  [b cyan]/logs[/]     查看最近几次压缩记录（压了哪些内容）\n"
             "  [b cyan]/help[/]     本帮助\n"
             "  [b cyan]exit[/]      退出（或 ctrl+q）\n"
         )

@@ -29,6 +29,7 @@ USE_COLOR = cm.enable_ansi()
 HELP_TEXT = """可用命令：
   /compact   压缩当前会话上下文：先把原始记录完整归档，再让 LLM 生成摘要替换历史
   /context   查看上下文用量、阈值状态与归档文件列表
+  /logs      查看最近几次压缩记录（压缩了哪些内容、摘要结构、归档编号）
   /help      显示本帮助
   /exit      退出（也可以输入 exit / quit / q）"""
 
@@ -102,8 +103,24 @@ def do_compact(history: list) -> list:
     print(f"   Token：约 {cm.format_k(before)} → 约 {cm.format_k(after)}")
     print(f"   归档编号：{info['id']}")
     print(f"   归档文件：{info['path']}")
-    print("   摘要末尾已追加归档说明；需要旧细节时可让 Agent 调用 recallContext 检索。\n")
+    print("   摘要末尾已追加归档说明；需要旧细节时可让 Agent 调用 recallContext 检索。")
+    print()
+    for line in cm.describe_block(info):          # 「本次压缩了什么」明细
+        print(line)
+    print("   输入 /logs 可查看历次压缩记录。\n")
     return new_history
+
+
+def show_logs(blocks: int = 3) -> None:
+    """查看最近几次压缩日志：每次压了哪些内容、摘要结构、归档编号。"""
+    log_path = CONTEXT.archive_dir / cm.COMPACT_LOG_NAME
+    text = cm.read_compact_log(log_path, blocks)
+    print()
+    if not text:
+        print(f"暂无压缩记录（{log_path} 不存在或为空）。执行一次 /compact 后会生成。\n")
+        return
+    print(text)
+    print(f"\n完整日志：{log_path}\n")
 
 
 def show_skills() -> None:
@@ -179,6 +196,8 @@ def interactive() -> None:
                 history = do_compact(history)
             elif low in ("/context", "/status"):
                 show_context_detail(history)
+            elif low in ("/logs", "/log"):
+                show_logs()
             elif low in ("/help", "/?"):
                 print(HELP_TEXT)
             else:
