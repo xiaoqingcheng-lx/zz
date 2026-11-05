@@ -23,7 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rich.markup import escape                              # noqa: E402
 from textual import work                                   # noqa: E402
 from textual.app import App, ComposeResult                  # noqa: E402
-from textual.widgets import Footer, Header, Input, RichLog, Static  # noqa: E402
+from textual.containers import Horizontal, Vertical          # noqa: E402
+from textual.screen import ModalScreen                       # noqa: E402
+from textual.widgets import (Button, Footer, Header, Input,   # noqa: E402
+                             RichLog, Static)
 
 import context_manager as cm                                # noqa: E402
 from xagent import (CONTEXT, LOCAL_SCHEMAS, MCP, SKILLS,    # noqa: E402
@@ -34,6 +37,7 @@ HELP = (
     "  [b cyan]/compact[/]  压缩上下文（先归档原文，再让 LLM 生成摘要替换历史）\n"
     "  [b cyan]/context[/]  查看上下文用量、阈值状态与归档文件\n"
     "  [b cyan]/logs[/]     查看最近几次压缩记录（压了哪些内容、摘要结构）\n"
+    "  [b cyan]/result[/]   重新打开上次压缩的对照面板（左原文 / 右摘要，可滚动）\n"
     "  [b cyan]/tools[/]    查看当前可调用的全部工具（本地 + MCP）\n"
     "  [b cyan]/help[/]     本帮助\n"
     "  [b cyan]exit[/]      退出（或 ctrl+q）\n"
@@ -53,7 +57,159 @@ CSS = """
 #prompt {
     border: round $accent;
 }
+
+/* ---------- 压缩结果浮动面板 ---------- */
+CompactResultScreen {
+    align: center middle;
+    background: $background 70%;
+}
+#compact-dialog {
+    width: 96%;
+    height: 92%;
+    border: thick $accent;
+    background: $surface;
+    padding: 0 1;
+}
+#compact-bar {
+    height: 3;
+}
+#compact-bar-title {
+    width: 1fr;
+    content-align: left middle;
+    padding: 0 1;
+}
+#compact-meta {
+    height: auto;
+    padding: 0 1 1 1;
+}
+#compact-body {
+    height: 1fr;
+}
+.col {
+    width: 1fr;
+    height: 1fr;
+}
+.col-title {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $text-muted;
+}
+#col-left {
+    border: round $primary;
+}
+#col-right {
+    border: round $success;
+}
+.col-log {
+    height: 1fr;
+    padding: 0 1;
+}
+#compact-hint {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
 """
+
+
+class CompactResultScreen(ModalScreen):
+    """压缩完成后的浮动面板：左侧压缩前原文，右侧压缩后结果。
+
+    · 两栏各自独立滚动（↑↓ / PgUp / PgDn / 鼠标滚轮）；
+    · 右栏是压缩后真正替换进历史的摘要正文 + 归档说明；
+    · 右上角「✕ 关闭」按钮或 Esc 关闭，关闭后回到对话界面继续提问。
+    """
+
+    BINDINGS = [("escape", "close_panel", "关闭面板")]
+
+    def __init__(self, info: dict, original_view: str,
+                 before: int, after: int) -> None:
+        super().__init__()
+        self.info = info or {}
+        self.original_view = original_view or "（没有可展示的历史消息）"
+        self.before = int(before or 0)
+        self.after = int(after or 0)
+
+    # ---------------- 结构 ----------------
+    def compose(self) -> ComposeResult:
+        with Vertical(id="compact-dialog"):
+            with Horizontal(id="compact-bar"):
+                yield Static("[cyan]上下文压缩结果[/] [dim]· 压缩前原文 / 压缩后摘要对照[/]",
+                             id="compact-bar-title")
+                yield Button("✕ 关闭", id="compact-close", variant="error")
+            yield Static(self._meta_text(), id="compact-meta")
+            with Horizontal(id="compact-body"):
+                with Vertical(classes="col", id="col-left"):
+                    yield Static(self._left_title(), classes="col-title")
+                    yield RichLog(id="compact-left", classes="col-log", min_width=20,
+                                  markup=True, wrap=True, highlight=False,
+                                  auto_scroll=False)
+                with Vertical(classes="col", id="col-right"):
+                    yield Static(self._right_title(), classes="col-title")
+                    yield RichLog(id="compact-right", classes="col-log", min_width=20,
+                                  markup=True, wrap=True, highlight=False,
+                                  auto_scroll=False)
+            yield Static("↑↓ / PgUp / PgDn 滚动　｜　Tab 切换左右　｜　"
+                         "Esc 或点右上角「✕ 关闭」返回对话", id="compact-hint")
+
+    def on_mount(self) -> None:
+        # 等第一次布局完成再写内容：RichLog 按写入时的宽度折行，
+        # 太早写会按错误宽度折行，之后被横向裁掉。
+        self.call_after_refresh(self._fill_panes)
+
+    def _fill_panes(self) -> None:
+        left = self.query_one("#compact-left", RichLog)
+        right = self.query_one("#compact-right", RichLog)
+        self._fill(left, self.original_view, "cyan")
+        self._fill(right, cm.render_summary_view(self.info), "green")
+        for log in (left, right):                # 从第一行开始看，不要自动跳到末尾
+            log.scroll_home(animate=False)
+        left.focus()
+
+    # ---------------- 文案 ----------------
+    def _meta_text(self) -> str:
+        info = self.info
+        before = info.get("before") or {}
+        roles = before.get("roles") or {}
+        ratio = (self.after / self.before * 100) if self.before else 0
+        return (
+            f"[cyan]归档编号[/] {escape(str(info.get('id', '')))}　"
+            f"[cyan]压缩时间[/] {escape(str(info.get('when', '')))}　"
+            f"[cyan]模型[/] {escape(str(info.get('model', '')))}\n"
+            f"[cyan]Token[/] [b yellow]{cm.format_k(self.before)} → {cm.format_k(self.after)}[/]"
+            f"（占 {ratio:.0f}%）　｜　[cyan]消息[/] {info.get('replaced', 0)} 条"
+            f"（u{roles.get('user', 0)}/a{roles.get('assistant', 0)}/t{roles.get('tool', 0)}）"
+            f"　｜　[cyan]原文[/] {info.get('source_chars', 0):,} 字符 "
+            f"≈ {cm.format_k(info.get('source_tokens', 0))} Tokens\n"
+            f"[dim]归档文件：{escape(str(info.get('path', '')))}[/]"
+        )
+
+    def _left_title(self) -> str:
+        return (f"[cyan]◀ 压缩前原文[/] [dim]· {self.info.get('replaced', 0)} 条 · "
+                f"{len(self.original_view):,} 字符[/]")
+
+    def _right_title(self) -> str:
+        return (f"[green]压缩后结果 ▶[/] [dim]· 1 条摘要 · "
+                f"{self.info.get('chars', 0):,} 字符[/]")
+
+    # ---------------- 渲染 ----------------
+    def _fill(self, log: RichLog, text: str, head_color: str) -> None:
+        for line in text.splitlines():
+            if line.startswith("▌"):
+                log.write(f"[{head_color}]{escape(line)}[/]")
+            elif line.startswith("→"):
+                log.write(f"[yellow]{escape(line)}[/]")
+            else:
+                log.write(escape(line))
+
+    # ---------------- 关闭 ----------------
+    def action_close_panel(self) -> None:
+        self.dismiss()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "compact-close":
+            self.dismiss()
 
 
 class XAgentTUI(App):
@@ -75,6 +231,7 @@ class XAgentTUI(App):
         self.busy = False             # 正在等 LLM / 跑工具 / 压缩
         self.status_text = ""         # 供自测断言
         self.run_hook = run_agent     # 自测时可替换为假实现
+        self.last_compact_view = None  # 最近一次压缩的 (info, 原文, before, after)
 
     # ------------------------------------------------------------------ #
     # 界面结构
@@ -100,6 +257,16 @@ class XAgentTUI(App):
         log.write("[dim]Enter 发送 ｜ /compact 压缩 ｜ /context 用量 ｜ F2 清空 ｜ ctrl+q 退出[/]\n")
         self._refresh_status()
         self.query_one("#prompt", Input).focus()
+
+    def on_screen_resume(self) -> None:
+        """浮动面板关闭后回到对话界面：重新聚焦输入框。"""
+        try:
+            prompt_input = self.query_one("#prompt", Input)
+        except Exception:                        # 界面尚未构建完
+            return
+        if not self.busy:
+            prompt_input.disabled = False
+            prompt_input.focus()
 
     # ------------------------------------------------------------------ #
     # 状态栏
@@ -166,6 +333,8 @@ class XAgentTUI(App):
                 self._show_tools(log)
             elif cmd in ("/logs", "/log"):
                 self._show_logs(log)
+            elif cmd in ("/result", "/panel", "/last"):
+                self._show_compact_panel(log)
             elif cmd in ("/help", "/?"):
                 log.write(HELP)
             else:
@@ -255,6 +424,7 @@ class XAgentTUI(App):
             self.call_from_thread(log.write, f"[dim]{escape(msg.strip())}[/]")
 
         before = cm.estimate_messages_tokens(self.history)
+        original_view = cm.render_history_view(self.history)   # 面板左侧用的原文快照
         try:
             new_history, info = compact_session(
                 self.history, ctx=CONTEXT, verbose=True,
@@ -268,12 +438,13 @@ class XAgentTUI(App):
             self.call_from_thread(log.write, "[dim]   原有上下文完整保留，可再次输入 /compact 重试[/]\n")
         else:
             after = cm.estimate_messages_tokens(new_history)
-            self.call_from_thread(self._apply_compact, new_history, info, before, after, log)
+            self.call_from_thread(self._apply_compact, new_history, info,
+                                  before, after, log, original_view)
             return
         self.call_from_thread(self._finish_turn)
 
-    def _apply_compact(self, new_history: list, info: dict,
-                       before: int, after: int, log: RichLog) -> None:
+    def _apply_compact(self, new_history: list, info: dict, before: int, after: int,
+                       log: RichLog, original_view: str) -> None:
         self.history = list(new_history)
         log.write(f"[b green]✅ 压缩完成[/]：{info['replaced']} 条 → 1 条摘要 ｜ "
                   f"Token 约 {cm.format_k(before)} → 约 {cm.format_k(after)}")
@@ -293,8 +464,11 @@ class XAgentTUI(App):
                 log.write(f"{indent}[b]{escape(head)}[/]  [dim]{escape(rest.strip())}[/]")
             else:
                 log.write(f"{indent}[dim]{escape(body)}[/]")
-        log.write("[dim]   输入 /logs 可查看历次压缩记录[/]\n")
+        log.write("[dim]   输入 /logs 可查看历次压缩记录，/result 可重新打开对照面板[/]\n")
         self._finish_turn()
+        # 压缩完成 → 弹出浮动面板：左原文 / 右摘要，可滚动、可关闭
+        self.last_compact_view = (info, original_view, before, after)
+        self.push_screen(CompactResultScreen(info, original_view, before, after))
 
     # ------------------------------------------------------------------ #
     # 只读命令
@@ -319,6 +493,14 @@ class XAgentTUI(App):
             log.write(f"[dim]     … 另有 {len(archives) - 5} 个[/]")
         log.write("")
         self._refresh_status()
+
+    def _show_compact_panel(self, log: RichLog) -> None:
+        """重新打开最近一次压缩的对照面板（左侧原文 / 右侧摘要）。"""
+        if not self.last_compact_view:
+            log.write("[dim]暂无压缩记录，执行一次 /compact 后可查看对照面板。[/]\n")
+            return
+        info, original_view, before, after = self.last_compact_view
+        self.push_screen(CompactResultScreen(info, original_view, before, after))
 
     def _show_logs(self, log: RichLog) -> None:
         """查看最近几次压缩日志：每次压了哪些内容、摘要结构、归档编号。"""

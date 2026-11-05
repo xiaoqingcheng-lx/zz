@@ -4,7 +4,8 @@
     py selftest_tui.py
 
 覆盖：状态栏文案、用户消息渲染、工具调用与返回回显、最终回答、
-      /help、/context、70% 闸门拒绝新消息、F2 清空会话。
+      /help、/context、/tools、压缩结果浮动面板（左原文 / 右摘要 / 滚动 / 关闭）、
+      70% 闸门拒绝新消息、F2 清空会话。
 """
 import asyncio
 import sys
@@ -102,6 +103,67 @@ async def main() -> int:
         await pilot.pause(0.3)
         text = "\n".join(s.text for s in log.lines)
         check("/tools 列出工具", "RunCli" in text and "个工具" in text)
+
+        # ---- /compact 浮动面板（左原文 / 右摘要，可滚动，可关闭）----
+        import xagent as xa
+        xa.summarize_chat = (lambda sys_p, user_p:
+                             "# 工作摘要\n- 已完成压缩面板\n- 路径 D:/大语言模型/agent/xagent")
+        app.history = [
+            {"role": "user", "content": "第一问：帮我看下项目结构 " + "补充说明" * 120},
+            {"role": "assistant", "content": None,
+             "tool_calls": [{"id": "c1", "type": "function",
+                             "function": {"name": "RunCli",
+                                          "arguments": '{"command":"ls"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "tui_app.py\ncontext_manager.py"},
+            {"role": "assistant", "content": "目录已确认。"},
+            {"role": "user", "content": "第二问：记住路径 D:/大语言模型/agent/xagent"},
+            {"role": "assistant", "content": "已记住。"},
+        ]
+        inp.value = "/compact"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause(0.6)
+
+        from textual.widgets import Button
+        from tui_app import CompactResultScreen
+        check("压缩完成弹出浮动面板", isinstance(app.screen, CompactResultScreen),
+              type(app.screen).__name__)
+        scr = app.screen
+        left = scr.query_one("#compact-left", RichLog)
+        right = scr.query_one("#compact-right", RichLog)
+        left_text = "\n".join(l.text for l in left.lines)
+        right_text = "\n".join(l.text for l in right.lines)
+        check("左栏是压缩前原文", "第一问" in left_text and "第二问" in left_text)
+        check("左栏保留工具调用与参数", "RunCli" in left_text and "command" in left_text)
+        check("左栏按角色分块", "▌ #0" in left_text and "用户" in left_text)
+        check("右栏是压缩后摘要", "工作摘要" in right_text and "已完成压缩面板" in right_text)
+        check("右栏含归档说明", "recallContext" in right_text)
+        check("左栏可滚动", left.max_scroll_y > 0, str(left.max_scroll_y))
+        check("两栏各自有滚动条",
+              left.show_vertical_scrollbar and right.show_vertical_scrollbar)
+        check("两栏等宽", abs(left.size.width - right.size.width) <= 2,
+              f"{left.size.width} vs {right.size.width}")
+        check("有独立滚动位置", left.scroll_y == 0 and right.scroll_y == 0)
+        await pilot.press("pagedown")
+        await pilot.pause(0.2)
+        check("面板内可上下滚动", left.scroll_y > 0, str(left.scroll_y))
+        check("有关闭按钮", scr.query_one("#compact-close", Button) is not None)
+        check("历史已替换为 1 条摘要", len(app.history) == 1, str(len(app.history)))
+
+        await pilot.press("escape")
+        await pilot.pause(0.3)
+        check("Esc 关闭面板", type(app.screen).__name__ == "Screen", type(app.screen).__name__)
+        check("关闭后输入框可用", inp.disabled is False)
+
+        inp.value = "/result"
+        await pilot.press("enter")
+        await pilot.pause(0.4)
+        check("/result 可重开面板", isinstance(app.screen, CompactResultScreen),
+              type(app.screen).__name__)
+        await pilot.click("#compact-close")
+        await pilot.pause(0.3)
+        check("点「关闭」按钮可关闭", type(app.screen).__name__ == "Screen",
+              type(app.screen).__name__)
 
         # ---- 70% 闸门 ----
         from xagent import CONTEXT

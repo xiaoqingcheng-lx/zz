@@ -266,6 +266,69 @@ def render_transcript(messages, archive_id: str = "", header: str = "") -> str:
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------- #
+# 把消息渲染成「给人看的原文」（压缩结果浮动面板用）
+# --------------------------------------------------------------------------- #
+VIEW_ROLE_LABEL = {
+    "user": "用户",
+    "assistant": "助手",
+    "tool": "工具返回",
+    "system": "系统",
+}
+
+
+def render_history_view(messages, per_msg_limit: int = 4_000) -> str:
+    """把历史消息渲染成人可读的原文，供压缩前后对照面板的左侧使用。
+
+    与 render_transcript 的区别：这里给「人」看，用中文角色名、按条分块，
+    每条内容上限更宽松（默认 4000 字符），超长时注明已截断并指向归档文件。
+    """
+    lines: list[str] = []
+    for idx, msg in enumerate(messages or []):
+        role = msg.get("role", "unknown")
+        if role == "system":
+            continue
+        label = VIEW_ROLE_LABEL.get(role, role)
+        head = f"▌ #{idx}  {label}"
+        if msg.get("tool_call_id"):
+            head += f"  ·  {msg['tool_call_id']}"
+        calls = msg.get("tool_calls") or []
+        if calls:
+            head += f"  ·  {len(calls)} 次工具调用"
+        lines.append(head)
+
+        content = msg.get("content")
+        if content:
+            lines.append(_one_line(str(content), per_msg_limit))
+        elif calls:
+            lines.append("（本条没有文本内容，只有工具调用）")
+        for tc in calls:
+            fn = (tc or {}).get("function") or {}
+            args = fn.get("arguments") or ""
+            lines.append(f"→ {fn.get('name')}")
+            lines.append(_one_line(str(args), 1_500))
+        lines.append("")
+    return "\n".join(lines).rstrip() or "（没有可展示的历史消息）"
+
+
+def render_summary_view(info: dict) -> str:
+    """把压缩结果渲染成面板右侧的展示文本（摘要正文 + 归档说明）。"""
+    info = info or {}
+    summary = (info.get("summary") or "").strip() or "（摘要为空）"
+    body = [
+        f"▌ 摘要正文  ·  约 {format_k(info.get('tokens_estimate', 0))} Tokens"
+        f"  ·  {info.get('chars', 0):,} 字符",
+        summary,
+        "",
+        "▌ 归档说明（已追加到摘要末尾，随历史一起送入模型）",
+        ARCHIVE_NOTE.format(when=info.get("when", ""), archive_id=info.get("id", "")),
+        "",
+        "▌ 替换后的会话历史",
+        f"共 1 条 user 消息：摘要正文 + 归档说明；System Prompt 与工具定义保持原样。",
+    ]
+    return "\n".join(body)
+
+
 def _slice_long_block(text: str, budget: int) -> list[str]:
     """把单段超长文本（比如一大坨工具输出）按字符数硬切成若干片。"""
     step = max(200, int(budget * 1.2))     # 中文约 1 字 1 token，留点余量
