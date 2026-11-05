@@ -8,7 +8,9 @@
 本模块额外提供 ``ChatService``——会话状态（历史记录）管理，
 供各 UI 层使用；UI 层禁止绕过它直接调用原件的底层函数。
 """
+import json
 import sys
+import urllib.request
 from pathlib import Path
 
 # 原始文件位于 agent 根目录（core/ 的上一级）
@@ -20,8 +22,15 @@ if str(_ROOT) not in sys.path:
 import llm_cli  # noqa: E402
 from llm_cli import ask_stream  # noqa: E402,F401
 
+# 上下文压缩（逻辑在 xagent/context_manager.py，这里只做适配）
+from core.context import (CompactError, ContextManager,  # noqa: E402
+                          estimate_messages_tokens, format_k, ratio_color)
+
 # 原件里叫 _load_config，这里补一个不含下划线的公开别名
 load_config = llm_cli._load_config
+
+# 摘要生成比较慢，单独给一个更宽松的超时（秒）
+SUMMARY_TIMEOUT = 300
 
 
 class ChatService:
@@ -32,6 +41,8 @@ class ChatService:
 
     def __init__(self) -> None:
         self.history: list[dict] = []          # 与原件相同的 messages 结构
+        # 上下文计量 / 归档 / 压缩（项目本地 .agents/context/）
+        self.ctx = ContextManager(project_root=_ROOT, model=self.model)
 
     # ---------- 会话状态 ----------
     @property
@@ -65,6 +76,77 @@ class ChatService:
         if parts:
             self.history.append({"role": "user", "content": prompt})
             self.history.append({"role": "assistant", "content": "".join(parts)})
+
+    # ---------- 上下文计量与压缩 ----------
+    def used_tokens(self) -> int:
+        """当前上下文的 Token 占用（历史消息；本界面没有 system prompt）。"""
+        return self.ctx.used_tokens(self.history)
+
+    def ratio(self) -> float:
+        return self.ctx.ratio(self.used_tokens())
+
+    def blocked(self) -> bool:
+        """是否已到 70% 阈值：到达后应暂停接收普通输入，只允许 /compact。"""
+        return self.ctx.update_blocked(self.used_tokens())
+
+    def context_status(self) -> dict:
+        used = self.used_tokens()
+        self.ctx.update_blocked(used)          # 顺带同步闸门状态，状态栏才不会滞后
+        return {
+            "used": used,
+            "used_k": format_k(used),
+            "window": self.ctx.window,
+            "window_k": format_k(self.ctx.window),
+            "is_default": self.ctx.window_is_default,
+            "ratio": self.ctx.ratio(used),
+            "color": ratio_color(self.ctx.ratio(used)),
+            "source": self.ctx.api_source,
+            "blocked": self.ctx.blocked,
+            "archives": len(list(self.ctx.archive_dir.glob("*.jsonl"))) if self.ctx.archive_dir.is_dir() else 0,
+        }
+
+    def replace_history(self, new_history: list) -> None:
+        self.history[:] = list(new_history)
+
+    def complete(self, system_prompt: str, user_content: str, max_tokens: int = 6000) -> str:
+        """纯文本补全（非流式、不带历史）：只给上下文压缩用。
+
+        刻意不复用 ask_stream——压缩必须是一次性的、确定的请求，
+        不能边生成边往历史里写，也不能带工具定义。
+        """
+        base_url, key, model = load_config()
+        if not key:
+            raise RuntimeError("未配置 API Key，无法生成摘要")
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "system", "content": system_prompt},
+                         {"role": "user", "content": user_content}],
+            "max_tokens": max_tokens,
+        }).encode()
+        req = urllib.request.Request(
+            base_url.rstrip("/") + "/chat/completions",
+            data=body,
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+        )
+        with urllib.request.urlopen(req, timeout=SUMMARY_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data["choices"][0]["message"].get("content") or ""
+
+    def compact(self, progress=None) -> dict:
+        """执行一次上下文压缩：归档原始记录 → LLM 生成摘要 → 替换历史。
+
+        失败时抛 CompactError，且不会改动 self.history。
+        """
+        if not self.history:
+            raise CompactError("当前会话还没有可压缩的历史消息。")
+        printer = progress or (lambda *_: None)
+
+        def chat(system_prompt: str, user_content: str, max_tokens: int = 6000) -> str:
+            return self.complete(system_prompt, user_content, max_tokens)
+
+        new_history, info = self.ctx.compact(self.history, chat, verbose=True, printer=printer)
+        self.replace_history(new_history)      # 只有摘要生成成功才替换
+        return info
 
     # ---------- 元信息 ----------
     @property

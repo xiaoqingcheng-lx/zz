@@ -1,6 +1,7 @@
 @echo off
-title Chat TUI
-cd /d "D://´óÓïÑÔÄ£ÐÍ//agent"
-python main.py
+chcp 65001 >nul
+title Chat TUI - qwen
+cd /d "%~dp0"
+py main.py
 echo.
 pause

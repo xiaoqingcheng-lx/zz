@@ -48,4 +48,4 @@ agent/office/*.old
 *.egg-info/
 
 # 上下文压缩归档（原始对话记录属本地数据，不进仓库）
-.agents/context/
+**/.agents/context/
