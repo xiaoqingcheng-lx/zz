@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AnythingLLM 文档上传</title>
+<style>
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; max-width: 720px;
+         margin: 40px auto; padding: 0 20px; color: #1f2328; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #656d76; font-size: 13px; margin-bottom: 20px; }
+  .box { border: 1px solid #d0d7de; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+  .ws { font-weight: 600; }
+  .ok { color: #1a7f37; } .err { color: #cf222e; } .wait { color: #9a6700; }
+  button { padding: 7px 16px; font-size: 14px; border: 1px solid #d0d7de;
+           border-radius: 6px; background: #f6f8fa; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button:hover:not(:disabled) { background: #eef1f4; }
+  #result { margin-top: 14px; font-size: 13px; line-height: 1.9; }
+  #result div { border-bottom: 1px dashed #e3e6ea; padding: 2px 0; }
+  code { background: #f6f8fa; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>AnythingLLM 文档上传</h1>
+<div class="sub">上传后由 AnythingLLM 自动解析并完成向量化嵌入</div>
+
+<div class="box">
+  <div id="status">正在连接 localhost:3001 ...</div>
+</div>
+
+<div class="box">
+  <input type="file" id="files" multiple>
+  <button id="btn" disabled>上传并嵌入</button>
+  <div id="result"></div>
+</div>
+
+<script>
+const BASE = "http://localhost:3001/api/v1";
+let HEAD = null;                       // 拿到 Key 后再设 Authorization
+const JSON_HEAD = () => ({ ...HEAD, "Content-Type": "application/json" });
+
+// API Key 不写死在页面里：优先读本机同目录 apikey.local.txt（不进仓库），
+// 读不到就弹输入框，记到 localStorage，本地开发用。
+async function loadApiKey() {
+  try {
+    const r = await fetch("apikey.local.txt", { cache: "no-store" });
+    if (r.ok) {
+      const t = (await r.text()).trim();
+      if (t) return t;
+    }
+  } catch (e) { /* 文件不存在很正常 */ }
+  let k = localStorage.getItem("anythingllm_api_key") || "";
+  if (!k) {
+    k = (prompt("请输入 AnythingLLM API Key（开发者设置里生成）：") || "").trim();
+    if (k) localStorage.setItem("anythingllm_api_key", k);
+  }
+  return k;
+}
+
+let workspace = null;
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 取第一个工作区
+(async () => {
+  const key = await loadApiKey();
+  if (!key) {
+    $("status").innerHTML = '<span class="err">● 未提供 API Key，无法连接</span>';
+    return;
+  }
+  HEAD = { "Authorization": "Bearer " + key };
+  try {
+    const r = await fetch(BASE + "/workspaces", { headers: HEAD });
+    if (!r.ok) throw new Error("HTTP " + r.status + "（API Key 可能失效）");
+    const list = (await r.json()).workspaces || [];
+    if (!list.length) throw new Error("没有任何工作区");
+    workspace = list[0];
+    $("status").innerHTML = '<span class="ok">● 已连接</span> · 目标工作区：' +
+      '<span class="ws">' + workspace.name + '</span> ' +
+      '<code>' + workspace.slug + '</code>';
+    $("btn").disabled = false;
+  } catch (e) {
+    $("status").innerHTML = '<span class="err">● 连接失败：' + e.message + '</span>';
+  }
+})();
+
+// 用文件名做向量检索，验证文档是否真的能"被搜到"
+async function verifyEmbedded(name, tries = 3) {
+  const q = name.replace(/\.[^.]+$/, "") || name;
+  for (let i = 0; i < tries; i++) {
+    await sleep(2000 + i * 2500);
+    try {
+      const r = await fetch(BASE + "/workspace/" + workspace.slug + "/vector-search", {
+        method: "POST", headers: JSON_HEAD(),
+        body: JSON.stringify({ query: q, topN: 6, scoreThreshold: 0 })
+      });
+      const j = await r.json();
+      const hit = (j.results || []).find(x =>
+        (((x.metadata || {}).title) || "").includes(q));
+      if (hit) return hit;
+    } catch (e) { /* 忽略重试期间的网络抖动 */ }
+  }
+  return null;
+}
+
+$("btn").onclick = async () => {
+  const files = [...$("files").files];
+  if (!files.length) return;
+  $("btn").disabled = true;
+  $("result").innerHTML = "";
+
+  for (const f of files) {
+    const row = document.createElement("div");
+    row.textContent = f.name + " — 上传中...";
+    $("result").appendChild(row);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("addToWorkspaces", workspace.slug);   // 关键：上传即触发嵌入
+      const r = await fetch(BASE + "/document/upload", {
+        method: "POST", headers: HEAD, body: fd
+      });
+      const j = await r.json();
+      if (!j.success) {
+        row.innerHTML = '<span class="err">✗</span> ' + f.name +
+                        ' — ' + (j.error || "未知错误");
+        continue;
+      }
+      row.innerHTML = '<span class="ok">✓</span> ' + f.name +
+                      ' — 已上传，正在嵌入… <span class="wait">验证中</span>';
+
+      const hit = await verifyEmbedded(f.name);
+      if (hit) {
+        row.innerHTML = '<span class="ok">✓</span> ' + f.name +
+          ' — <b>上传成功，嵌入已生效</b>（检索命中，相似度 ' +
+          (hit.score * 100).toFixed(1) + '%）';
+      } else {
+        row.innerHTML = '<span class="ok">✓</span> ' + f.name +
+          ' — 已上传并提交嵌入，<span class="wait">但暂未检索到</span>' +
+          '<br><span class="sub">可能仍在后台排队；也可能是中文语义匹配较弱，' +
+          '稍后到 AnythingLLM 工作区查看即可</span>';
+      }
+    } catch (e) {
+      row.innerHTML = '<span class="err">✗</span> ' + f.name + ' — ' + e.message;
+    }
+  }
+  $("btn").disabled = false;
+};
+</script>
+
+</body>
+</html>

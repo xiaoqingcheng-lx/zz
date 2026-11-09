@@ -10,6 +10,8 @@
 | `agent/practice01/` | 会话记录归档（jsonl 原始件 + 可读 md，密钥已脱敏） |
 | `agent/practice02/` | MCP 工具服务：11 个工具 + 流式对话启动文件 + Mermaid 架构图 |
 | `AnythingLLMMCP/_setup/` | AnythingLLM 的 MCP 环境配置脚本（PATH、快捷菜单等） |
+| `AnythingLLMServer/` | AnythingLLM 本地私有知识库 + 自研文档上传网页（上传即嵌入、向量检索反向验证） |
+| `agent/xagent/` | **xAgent**：自研多模态 Agent（TUI + CLI，14+ 工具、MCP 异步接入、上下文压缩、会话管理、技能系统） |
 | `pethospitalMCP/` | 宠物医院 MCP 教学项目（Go 服务 + Python 客户端） |
 
 ## 运行前准备
