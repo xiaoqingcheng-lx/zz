@@ -849,12 +849,21 @@ class XAgentTUI(App):
     def _finish_turn(self) -> None:
         """一轮结束：刷新闸门、状态栏，恢复输入框。"""
         used = CONTEXT.used_tokens(self._messages())
+        was_blocked = CONTEXT.blocked
         CONTEXT.update_blocked(used)             # 越过阈值就挂闸门
         self.busy = False
         prompt_input = self.query_one("#prompt", Input)
         prompt_input.disabled = False
         prompt_input.focus()
         self._refresh_status()
+        # 首次越过阈值：在聊天区给一次醒目警告（之后靠状态栏常驻提示，避免每轮刷屏）
+        if CONTEXT.blocked and not was_blocked:
+            warn = CONTEXT.warning_line(self._messages(), use_color=False)
+            if warn:
+                self.query_one("#chatlog", RichLog).write(f"[b red]{escape(warn)}[/]")
+                self.query_one("#chatlog", RichLog).write(
+                    "[dim]   压缩前的原始上下文会归档到 .agents/context/，"
+                    "压缩后可用 recallContext 检索旧细节。[/]\n")
 
     # ------------------------------------------------------------------ #
     # 上下文压缩

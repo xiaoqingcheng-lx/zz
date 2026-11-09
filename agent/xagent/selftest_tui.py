@@ -182,7 +182,19 @@ async def main() -> int:
         CONTEXT.blocked = False
         app._refresh_status()
 
-        # ---- F2 清空 ----
+        # ---- 跨过阈值时，聊天区要主动弹警告（不只状态栏变红）----
+        orig_used = CONTEXT.used_tokens
+        CONTEXT.used_tokens = lambda msgs: int(CONTEXT.window * 0.75)
+        CONTEXT.blocked = False
+        app._finish_turn()
+        await pilot.pause(0.2)
+        text = "\n".join(s.text for s in log.lines)
+        check("跨阈值时聊天区弹出 /compact 警告", "请执行 /compact" in text, text[-300:])
+        check("警告里带具体占用百分比", "%" in text.split("请执行 /compact")[0][-40:],
+              text[-300:])
+        CONTEXT.used_tokens = orig_used
+        CONTEXT.blocked = False
+        app._refresh_status()
         await pilot.press("f2")
         await pilot.pause(0.3)
         check("F2 清空历史", app.history == [], str(app.history))

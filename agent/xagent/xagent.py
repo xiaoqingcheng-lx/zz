@@ -298,7 +298,7 @@ def dispatch_tool(name: str, arguments: dict) -> str:
     return json.dumps({"error": f"未知工具：{name}"}, ensure_ascii=False)
 
 
-BLOCKED_HINT = ("上下文已占用 {pct}（阈值 70%），已暂停接受新的提示词。"
+BLOCKED_HINT = ("上下文已占用 {pct}（阈值 {thr}），已暂停接受新的提示词。"
                 "请先执行 /compact 压缩上下文，成功后再继续。")
 
 
@@ -319,10 +319,11 @@ def run_agent(prompt: str, history: list = (), verbose: bool = True,
     """
     ctx = ctx or CONTEXT
 
-    # ---- 闸门：达到 70% 且尚未压缩，拒绝继续处理普通提示词 ----
+    # ---- 闸门：达到告警阈值（默认 60%）且尚未压缩，拒绝继续处理普通提示词 ----
     if ctx.blocked:
         used = ctx.used_tokens([{"role": "system", "content": system_prompt()}] + list(history))
-        return BLOCKED_HINT.format(pct=f"{ctx.ratio(used) * 100:.1f}%"), list(history)
+        return BLOCKED_HINT.format(pct=f"{ctx.ratio(used) * 100:.1f}%",
+                                   thr=f"{ctx.warn_ratio * 100:.0f}%"), list(history)
 
     messages = [{"role": "system", "content": system_prompt()}]
     messages += list(history)
